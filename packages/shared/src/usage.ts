@@ -141,5 +141,5 @@ export interface PostDetails {
   postId: string;
   status: string;
   scheduledAt: string | null;
-  results: { socialAccountId: string; success: boolean; error: string | null; url: string | null }[];
+  results: { socialAccountId: string; success: boolean; status?: string; error: string | null; url: string | null }[];
 }

@@ -16,6 +16,7 @@ import { useApp } from '@/state/app';
 import { useAuth } from '@/state/auth';
 import { HybridSettingsPanel } from '@/components/HybridSettings';
 import { useHybrid } from '@/lib/hybrid';
+import { deliveryPending } from '@/lib/postStatus';
 
 const when = (iso: string | null | undefined) => {
   const d = iso ? new Date(iso) : null;
@@ -128,7 +129,7 @@ function PostRow({ project: p }: { project: Project }) {
   const scheduled = details?.status === 'scheduled';
   const time = when(scheduled ? (details?.scheduledAt ?? p.scheduledAt) : (p.postedAt ?? p.updatedAt)) ?? '';
   const ok = details?.results.filter((r) => r.success) ?? [];
-  const failed = details?.results.filter((r) => !r.success) ?? [];
+  const failed = details?.results.filter((r) => !r.success && !deliveryPending(r, details.status)) ?? [];
   return (
     <li className="group relative flex items-center gap-4 rounded-lg px-3 py-2 hover:bg-raised/50">
       <button

@@ -14,6 +14,7 @@ import { defaultSlot, localToIso } from '@/components/ScheduleDialog';
 import { cloudErrorCode, platformName, socialAccounts, socialPost, socialPostStatus, type CloudErrorCode } from '@/lib/cloud';
 import { listProjects, mediaProbe } from '@/lib/ipc';
 import { isShortsFormat, shortsPlayerUrl } from '@/lib/shorts';
+import { deliveryPending } from '@/lib/postStatus';
 import { captionOf, readPostDraft, TITLE_MAX, type PostDraft } from '@/lib/postDraft';
 import { useApp } from '@/state/app';
 import { track } from '@/lib/analytics';
@@ -72,6 +73,19 @@ export function PostDialog({
   const [error, setError] = useState<CloudErrorCode | null>(null);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [details, setDetails] = useState<PostDetails | null>(null);
+  const detailsId = details?.postId;
+  const pendingDelivery = !!details?.results.some(r => deliveryPending(r, details.status));
+  useEffect(() => {
+    if (!open || !detailsId || !pendingDelivery) return;
+    let alive = true;
+    let loading = false;
+    const timer = setInterval(() => {
+      if (loading) return;
+      loading = true;
+      void socialPostStatus(detailsId).then(d => { if (alive) setDetails(d); }).catch(() => {}).finally(() => { loading = false; });
+    }, 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [open, detailsId, pendingDelivery]);
 
   useEffect(() => {
     if (!open) return;
@@ -312,7 +326,9 @@ export function PostDialog({
             {details.results.map((r) => (
               <li key={r.socialAccountId} className="flex items-center gap-2 text-[13px]">
                 <span className="min-w-0 flex-1 truncate">{accountName(r.socialAccountId)}</span>
-                {r.success ? (
+                {deliveryPending(r, details.status) ? (
+                  <span role="status" className="inline-flex items-center gap-1 text-text-2"><Spinner size={12} />{t('social.processing')}</span>
+                ) : r.success ? (
                   r.url ? (
                     <a href={shortsFormat && r.socialAccountId === 'yt:own' ? shortsPlayerUrl(r.url) ?? r.url : r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-orange-light">
                       {t(shortsFormat && r.socialAccountId === 'yt:own' && shortsPlayerUrl(r.url) ? 'post.openShorts' : 'post.open')}
@@ -323,7 +339,7 @@ export function PostDialog({
                   )
                 ) : (
                   <span className="text-orange-light" title={r.error ?? undefined}>
-                    {t('post.failed')}
+                    {r.error ? `${t('post.failed')}: ${r.error}` : t('post.failed')}
                   </span>
                 )}
               </li>

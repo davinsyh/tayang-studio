@@ -816,7 +816,7 @@ pub async fn status(h: &Hybrid, post_id: &str, refresh: bool) -> R<Value> {
                 v["status"] = p["status"].clone();
                 if let Some(target) = p["platforms"].as_array().and_then(|a| a.first()) {
                     v["url"] = target["platformPostUrl"].clone();
-                    v["error"] = target["error"].clone();
+                    v["error"] = target["errorMessage"].as_str().or_else(|| target["error"].as_str()).map(|s| json!(s)).unwrap_or(Value::Null);
                 }
                 h.save_delivery(project, &account, &v)?;
             }
@@ -870,7 +870,7 @@ pub async fn status(h: &Hybrid, post_id: &str, refresh: bool) -> R<Value> {
             at = v["at"].clone();
         }
         results.push(
-            json!({"socialAccountId":account,"success":success,"error":v["error"],"url":v["url"]}),
+            json!({"socialAccountId":account,"success":success,"status":state,"error":v["error"],"url":v["url"]}),
         );
         states.push(state);
     }

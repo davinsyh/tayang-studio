@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -154,6 +154,27 @@ describe('PostDialog', () => {
   // No post.json unless a test writes one.
   beforeEach(() => {
     vi.mocked(readProjectFile).mockRejectedValue('no file');
+  });
+
+  it('refreshes a publishing TikTok delivery to completion without sending the video again', async () => {
+    vi.mocked(invoke).mockResolvedValue({ privacyLevels: [], postingLimits: { interactionSettings: {} } });
+    vi.mocked(cloud.socialAccounts).mockResolvedValue([acct('z:tt', 'tiktok', 'ttcreator')]);
+    vi.mocked(cloud.socialPostStatus)
+      .mockResolvedValueOnce({ postId: 'hybrid:p1', status: 'processing', scheduledAt: null, results: [{ socialAccountId: 'z:tt', success: false, status: 'publishing', error: null, url: null }] })
+      .mockResolvedValue({ postId: 'hybrid:p1', status: 'published', scheduledAt: null, results: [{ socialAccountId: 'z:tt', success: true, status: 'published', error: null, url: 'https://www.tiktok.com/@ttcreator/video/123' }] });
+    vi.useFakeTimers();
+    const view = open({ ...project, socialPostId: 'hybrid:p1' });
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.getByText('Posting…')).toBeInTheDocument();
+      expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute('href', 'https://www.tiktok.com/@ttcreator/video/123');
+      expect(cloud.socialPost).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('selects all three Hybrid platforms and sends the caption separately from the YouTube title', async () => {
