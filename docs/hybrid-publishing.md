@@ -26,7 +26,11 @@ Zernio receives an Idempotency-Key per project/account. After an ambiguous respo
 
 ## Running
 
-Use `pnpm install --frozen-lockfile` then `pnpm dev:desktop`. The development app has its own application identifier/data folder. Do not install an upstream release over a customized build: the upstream updater does not contain these changes.
+Use `pnpm install --frozen-lockfile` then `pnpm dev:desktop`. On this personal fork, both development and release builds use `app.tayang.studio`, so they open the installed application's existing data. Close the installed application before launching the fork. The development window remains titled Tayang Studio Dev. Automatic and manual upstream updates are disabled; review and merge upstream source changes, then rebuild this fork.
+
+On Windows this checkout is at `C:\Project Video\tayang-studio`. You can also double-click `jalankan-tayang.cmd`. The development launcher uses the target folder's Windows short path to work around GNU windres include paths containing spaces; build files still live inside this checkout.
+
+The active data folder is `%APPDATA%\app.tayang.studio`. Chat/style/project data stays in the original `tayang.db`; the separate `publishing.db` was moved from the old Dev folder. Hybrid credentials use the same Windows Credential Manager service across both application identifiers, so they do not need to be copied as plaintext. Back up the data folder before switching builds or importing upstream database migrations. Single-instance activation prevents normal side-by-side launches of the two builds with this identifier; do not bypass it.
 
 ## Validation limits
 

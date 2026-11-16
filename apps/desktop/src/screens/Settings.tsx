@@ -30,6 +30,7 @@ import { useApp } from '@/state/app';
 import { cn } from '@/lib/utils';
 import { useInstall } from '@/state/install';
 import { useUpdater } from '@/state/updater';
+import { UPDATES_ENABLED } from '@/state/updatePolicy';
 
 const SECTIONS = ['general', 'agents', 'video', 'render', 'tools', 'usage', 'account', 'archive'] as const;
 export type SettingsTab = (typeof SECTIONS)[number];
@@ -61,7 +62,9 @@ function UpdatesRow({ dev = import.meta.env.DEV }: { dev?: boolean }) {
       gone = true;
     };
   }, []);
-  const status = dev
+  const status = !UPDATES_ENABLED
+    ? t('updates.customBuild')
+    : dev
     ? t('updates.devBuild')
     : phase === 'checking'
       ? t('updates.checking')
@@ -74,7 +77,7 @@ function UpdatesRow({ dev = import.meta.env.DEV }: { dev?: boolean }) {
             : undefined;
   return (
     <Row label={t('updates.label')} hint={current ? t('updates.version', { version: current }) : undefined} note={status}>
-      <Button variant="secondary" disabled={dev || phase === 'checking'} onClick={() => void check()}>
+      <Button variant="secondary" disabled={!UPDATES_ENABLED || dev || phase === 'checking'} onClick={() => void check()}>
         {t('updates.check')}
       </Button>
     </Row>

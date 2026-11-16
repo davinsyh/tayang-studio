@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }));
+vi.mock('@/state/updatePolicy', () => ({ UPDATES_ENABLED: true }));
 
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';

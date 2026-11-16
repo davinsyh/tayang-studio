@@ -780,6 +780,7 @@ export const id: Translations = {
     checking: 'Mengecek…',
     upToDate: 'Sudah versi terbaru',
     devBuild: 'Pembaruan mati di build pengembangan',
+    customBuild: 'Versi pribadi. Pembaruan dipasang dari fork Anda setelah diperiksa.',
   },
   claudeAccount: {
     signIn: 'Masuk ke Claude',

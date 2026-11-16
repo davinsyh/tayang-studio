@@ -49,7 +49,7 @@ Old saved addresses are migrated when the app reads its settings: `https://api.t
 ## Where data lives
 
 - App data (SQLite, `tayang.db`) is in the operating system's app data directory for Tayang Studio.
-- `pnpm dev:desktop` runs as **Tayang Studio Dev** (`app.tayang.studio.dev`, from `src-tauri/tauri.dev.conf.json`), so it has its own app data and runs beside an installed Tayang Studio (`app.tayang.studio`) without sharing chats, settings or its window. On macOS the two folders are `~/Library/Application Support/app.tayang.studio.dev` and `.../app.tayang.studio`. Dev builds keep the sign-in token in `auth-dev.json` there, never in the keychain.
+- In this personal fork, `pnpm dev:desktop` runs as **Tayang Studio Dev** with the installed app's identifier, `app.tayang.studio`. It uses the existing chats, styles, skills and settings directly. Close the installed app first; do not bypass single-instance protection. Windows data lives in `%APPDATA%\app.tayang.studio`. See [hybrid-publishing.md](hybrid-publishing.md) for the personal build and migration details. Dev sign-in tokens use `auth-dev.json`; Hybrid provider credentials remain in the OS keychain.
 - Projects live in the working folder the user picks. Agent sessions run with the project folder, or a `.tayang/<purpose>` subfolder of the working folder, as their working directory. They never run outside it.
 
 ## Permissions and the agent's own settings
@@ -78,7 +78,7 @@ To ship a version:
 
 ### Auto-update
 
-Release builds check `https://github.com/Maru-Yasa/tayang-studio/releases/latest/download/latest.json` 10 seconds after launch and every 6 hours. When a newer version is there, the sidebar offers it; the download is checked against the public key in `tauri.conf.json` and installed on restart. Dev builds never check. Drafts and pre-releases are never "latest", so they reach nobody until published. This only works while the repository is public: release downloads from a private repository need a login.
+This personal fork disables automatic checks, manual downloads and installation through `src/state/updatePolicy.ts`, and leaves the updater endpoints empty in `tauri.conf.json`. Merge reviewed upstream changes into the fork and rebuild to update it. Re-enabling in-app updates requires a release feed and signing keys owned by this fork; do not restore the official release feed, which would overwrite the personal features.
 
 The updater signing key is `~/.tauri/tayang-studio.key` on the maintainer's machine, with its password in `~/.tauri/tayang-studio.key.password`, and both are in the repository secrets (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Back them up somewhere safe. If the key is lost, installed copies can never update again, and everyone has to reinstall by hand.
 

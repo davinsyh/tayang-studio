@@ -786,6 +786,7 @@ export const en = {
     checking: 'Checking…',
     upToDate: "You're on the latest version",
     devBuild: 'Updates are off in development builds',
+    customBuild: 'Personal build. Updates are installed from your fork after review.',
   },
   claudeAccount: {
     signIn: 'Sign in to Claude',

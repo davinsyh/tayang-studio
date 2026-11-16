@@ -7,9 +7,13 @@ const dev = JSON.parse(devRaw);
 // `pnpm dev:desktop` merges tauri.dev.conf.json over tauri.conf.json. A merge replaces arrays whole,
 // so the dev window list is a copy of the release one: keep the two in step.
 describe('dev build config', () => {
-  it('runs as its own app, beside an installed Tayang Studio', () => {
-    expect(dev.identifier).toBe(`${prod.identifier}.dev`);
+  it('uses the installed app data and single-instance identity for this personal build', () => {
+    expect(dev.identifier).toBe(prod.identifier);
     expect(dev.productName).toBe(`${prod.productName} Dev`);
+  });
+
+  it('cannot replace the personal build with an upstream release', () => {
+    expect(prod.plugins.updater.endpoints).toEqual([]);
   });
 
   it('has the same window as a release, titled Dev', () => {

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { check as checkForUpdate, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { track } from '@/lib/analytics';
+import { UPDATES_ENABLED } from './updatePolicy';
 
 /** First check this long after launch, so it never competes with startup. */
 export const FIRST_CHECK_MS = 10 * 1000;
@@ -37,6 +38,7 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
   error: null,
 
   check: async () => {
+    if (!UPDATES_ENABLED) return;
     const { phase } = get();
     if (phase === 'checking' || phase === 'available' || phase === 'downloading' || phase === 'ready') return;
     set({ phase: 'checking', error: null });
@@ -50,6 +52,7 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
   },
 
   download: async () => {
+    if (!UPDATES_ENABLED) return;
     if (!pending || get().phase === 'downloading' || get().phase === 'ready') return;
     let total = 0;
     let got = 0;
@@ -70,6 +73,7 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
   },
 
   restart: async () => {
+    if (!UPDATES_ENABLED) return;
     if (!pending || get().phase !== 'ready') return;
     try {
       // On Windows the installer closes the app itself; elsewhere the new version is started here.
@@ -87,7 +91,7 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
  * dev binary with a release. Returns the cleanup.
  */
 export function startUpdateChecks(dev: boolean = import.meta.env.DEV): () => void {
-  if (dev) return () => {};
+  if (dev || !UPDATES_ENABLED) return () => {};
   const run = () => void useUpdater.getState().check();
   const first = setTimeout(run, FIRST_CHECK_MS);
   const every = setInterval(run, CHECK_EVERY_MS);
