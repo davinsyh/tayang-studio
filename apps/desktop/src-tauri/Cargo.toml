@@ -6,7 +6,8 @@ edition = "2021"
 
 [lib]
 name = "tayang_studio_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop executable links this Rust library directly; mobile embedding requires additional crate types.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

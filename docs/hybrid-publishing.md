@@ -41,3 +41,7 @@ References: https://docs.zernio.com/guides/media-uploads ; https://docs.zernio.c
 - `cargo check -j 1` passed for the native application.
 - The two native Hybrid tests compiled, but their executable could not start with the installed Windows GNU toolchain (`STATUS_ENTRYPOINT_NOT_FOUND`; an alternate runtime path also produced `STATUS_INVALID_IMAGE_FORMAT`). Their assertions have **not** been observed passing. Run `cargo test -j 1 hybrid::tests --lib` in a working native toolchain before treating native runtime behavior as verified.
 - Visual review used a temporary mock preview of the new controls, not a live provider connection. No API key, Google client or video was sent to Zernio/YouTube during validation.
+
+## Windows GNU desktop build
+
+The library target uses `rlib` only, which the desktop executable links directly. Building an additional `cdylib` with the Windows GNU linker exported more symbols than its ordinal limit (`export ordinal too large`). `cargo build --bin tayang-studio -j 1` now succeeds, and `pnpm dev:desktop` was observed opening the Tayang Studio Dev window on this Windows machine. Mobile embedding would need its own static/shared library build configuration.
