@@ -206,12 +206,13 @@ export function PostDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => phase.kind !== 'posting' && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t('post.title')}</DialogTitle>
           <DialogDescription>{t('post.description')}</DialogDescription>
         </DialogHeader>
 
+        <div className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain px-1">
         {phase.kind === 'done' ? (
           <p role="status" className="m-0 text-sm">
             {hybrid ? (t('hybrid.requestSaved')) : phase.result.status === 'scheduled'
@@ -349,7 +350,9 @@ export function PostDialog({
           </div>
         )}
 
-        <DialogFooter>
+        </div>
+
+        <DialogFooter className="shrink-0">
           {phase.kind === 'done' ? (
             <Button onClick={() => onOpenChange(false)}>{t('post.close')}</Button>
           ) : (
