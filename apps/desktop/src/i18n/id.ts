@@ -3,8 +3,14 @@ import type { Translations } from './en';
 /** Bahasa Indonesia. Kamu, not Anda; short, everyday sentences. */
 export const id: Translations = {
   hybrid: {
+    secondaryTitle: "Zernio B: YouTube + Halaman Facebook",
+    secondaryEnabled: "Aktifkan koneksi B",
+    secondaryKey: "Zernio B API key",
+    secondaryProfile: "Zernio B Profile ID",
+    secondaryHint: "Gunakan kredensial akun kedua. Facebook memerlukan Halaman. YouTube melalui B menggantikan Google langsung di daftar tujuan; kredensial Google tetap tersimpan sebagai cadangan.",
+
     title: "Posting dengan akun layanan sendiri",
-    description: "TikTok dan Instagram melalui Zernio; YouTube langsung melalui Google. Tidak perlu login Tayang untuk posting.",
+    description: "Zernio A untuk TikTok dan Instagram; Zernio B opsional untuk YouTube dan Facebook. Google langsung tetap tersedia. Tidak perlu login Tayang untuk posting.",
     enabled: "Gunakan integrasi Hybrid",
     savedKey: "Tersimpan; kosongkan untuk mempertahankan",
     keepSecret: "Kosongkan jika sudah tersimpan",
@@ -723,7 +729,7 @@ export const id: Translations = {
     youtubeTitle: 'Judul YouTube',
     captionHashtags: 'Caption & hashtag',
     multiPlatformHint: 'Semua akun terhubung sudah dipilih. Sekali posting mengirim video ke setiap akun yang dipilih.',
-    captionRouting: 'TikTok dan Instagram hanya menerima caption ini. YouTube menerima judul di atas dan teks ini sebagai deskripsi.',
+    captionRouting: 'TikTok, Instagram dan Facebook hanya menerima caption ini. YouTube menerima judul di atas dan teks ini sebagai deskripsi.',
     shortsEligible: '{{width}}×{{height}} · {{seconds}}d: memenuhi syarat format Shorts. YouTube menentukan klasifikasinya setelah pemrosesan.',
     shortsIneligible: '{{width}}×{{height}} · {{seconds}}d: Shorts memerlukan video persegi atau vertikal dengan durasi hingga 180 detik.',
     openShorts: 'Buka pemutar Shorts',

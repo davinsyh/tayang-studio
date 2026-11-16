@@ -52,6 +52,7 @@ export function PostDialog({
   agentBusy?: boolean;
 }) {
   const { t } = useTranslation();
+  const warnings = useHybrid(s => s.connectionWarnings);
   const hybrid = useHybrid(s => s.settings?.enabled ?? false);
   const [tiktokSettings, setTiktokSettings] = useState<Record<string,unknown>>();
   const [youtubePrivacy, setYoutubePrivacy] = useState('private');
@@ -320,7 +321,7 @@ export function PostDialog({
               )}
             </div>
             {tiktokAccount && <TikTokOptions key={tiktokAccount.id} accountId={tiktokAccount.id} contentKey={`${title}\n${caption}`} onChange={setTiktokSettings}/> }
-            {hybrid && picked.has('yt:own') && <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm"><legend>YouTube</legend>
+            {hybrid && youtubeSelected && <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm"><legend>YouTube</legend>
               {media && <p className="m-0 text-xs text-text-2">{t(shortsFormat ? 'post.shortsEligible' : 'post.shortsIneligible', { width: media.width, height: media.height, seconds: Math.round(media.durationSec) })}</p>}
               <label className="flex flex-col gap-1">{t('hybrid.youtubePrivacy')}<select className="rounded border border-border bg-card p-2" value={youtubePrivacy} onChange={e=>setYoutubePrivacy(e.target.value)}><option value="private">{t('hybrid.private')}</option><option value="unlisted">{t('hybrid.unlisted')}</option><option value="public">{t('hybrid.public')}</option></select></label>
               {later && <p className="m-0 text-xs text-text-2">{t('hybrid.scheduleHint')}</p>}
@@ -339,8 +340,8 @@ export function PostDialog({
                   <span role="status" className="inline-flex items-center gap-1 text-text-2"><Spinner size={12} />{t('social.processing')}</span>
                 ) : r.success ? (
                   r.url ? (
-                    <a href={shortsFormat && r.socialAccountId === 'yt:own' ? shortsPlayerUrl(r.url) ?? r.url : r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-orange-light">
-                      {t(shortsFormat && r.socialAccountId === 'yt:own' && shortsPlayerUrl(r.url) ? 'post.openShorts' : 'post.open')}
+                    <a href={shortsFormat && (r.socialAccountId === 'yt:own' || accounts?.some(a => a.id === r.socialAccountId && a.platform === 'youtube')) ? shortsPlayerUrl(r.url) ?? r.url : r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-orange-light">
+                      {t(shortsFormat && (r.socialAccountId === 'yt:own' || accounts?.some(a => a.id === r.socialAccountId && a.platform === 'youtube')) && shortsPlayerUrl(r.url) ? 'post.openShorts' : 'post.open')}
                       <ExternalLink size={12} aria-hidden="true" />
                     </a>
                   ) : (
@@ -356,6 +357,7 @@ export function PostDialog({
           </ul>
         )}
 
+        {warnings.map(warning => <p key={warning} role="alert" className="m-0 text-sm text-orange-light">{warning}</p>)}
         {hybridError && <p role="alert" className="m-0 text-sm text-orange-light">{hybridError}</p>}
         {error && (
           <div role="alert" className="flex flex-wrap items-center gap-3 text-xs text-orange-light">

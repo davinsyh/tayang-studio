@@ -1,3 +1,4 @@
+import { useHybrid } from './hybrid';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type { PostUploadProgress } from './uploadProgress';
 import type { CreatePostResponse, PostDetails, RedeemResponse, SocialAccount, SocialPlatform, UsageResponse } from '@tayang/shared';
@@ -40,7 +41,7 @@ export function cloudErrorCode(e: unknown): CloudErrorCode {
 export const cloudUsage = () => invoke<UsageResponse>('cloud_usage');
 /** Redeems a gift code for the signed-in account; Rust adds this computer's hashed id. */
 export const redeemGiftCode = (code: string) => invoke<RedeemResponse>('redeem_gift_code', { code });
-export const socialAccounts = () => invoke<{ accounts: SocialAccount[] }>('social_accounts').then((r) => r.accounts ?? []);
+export const socialAccounts = () => invoke<{ accounts: SocialAccount[]; warnings?: string[] }>('social_accounts').then((r) => { useHybrid.setState({ connectionWarnings: r.warnings ?? [] }); return r.accounts ?? []; });
 /** Opens the platform's sign-in page in the browser. */
 export const socialConnect = (platform: SocialPlatform) => invoke<void>('social_connect', { platform });
 export const socialDisconnect = (id: string) => invoke<void>('social_disconnect', { id });

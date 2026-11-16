@@ -5,14 +5,19 @@ export interface HybridSettings {
   profileId: string;
   clientId: string;
   hasZernioKey: boolean;
+  secondaryEnabled?: boolean;
+  secondaryProfileId?: string;
+  hasSecondaryZernioKey?: boolean;
   youtubeConnected: boolean;
   youtubeName?: string;
 }
 export const useHybrid = create<{
   settings: HybridSettings | null;
+  connectionWarnings: string[];
   refresh(): Promise<void>;
 }>((set) => ({
   settings: null,
+  connectionWarnings: [],
   async refresh() {
     try {
       set({ settings: await invoke<HybridSettings>("hybrid_settings") });
@@ -26,6 +31,9 @@ export const hybridSave = (o: {
   profileId: string;
   clientId: string;
   apiKey?: string;
+  secondaryEnabled?: boolean;
+  secondaryProfileId?: string;
+  secondaryApiKey?: string;
   clientSecret?: string;
 }) => invoke<void>("hybrid_save", o);
 export const youtubeConnect = () => invoke<void>("hybrid_youtube_connect");

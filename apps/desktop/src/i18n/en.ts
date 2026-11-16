@@ -1,8 +1,14 @@
 /** English UI strings: the source of truth. `id.ts` must have exactly the same keys. */
 export const en = {
   hybrid: {
+    secondaryTitle: "Zernio B: YouTube + Facebook Page",
+    secondaryEnabled: "Enable connection B",
+    secondaryKey: "Zernio B API key",
+    secondaryProfile: "Zernio B Profile ID",
+    secondaryHint: "Use credentials from your second account. Facebook requires a Page. Connected YouTube through B replaces direct Google in the destination list; Google credentials remain saved as a fallback.",
+
     title: "Publish with your own service accounts",
-    description: "TikTok and Instagram through Zernio; YouTube directly through Google. Publishing does not require a Tayang login.",
+    description: "Zernio A for TikTok and Instagram; optional Zernio B for YouTube and Facebook. Direct Google remains available. Publishing does not require a Tayang login.",
     enabled: "Use Hybrid publishing",
     savedKey: "Saved; leave blank to keep",
     keepSecret: "Leave blank if already saved",
@@ -729,7 +735,7 @@ export const en = {
     youtubeTitle: 'YouTube title',
     captionHashtags: 'Caption & hashtags',
     multiPlatformHint: 'All connected accounts are selected. Post once to send the video to every selected account.',
-    captionRouting: 'TikTok and Instagram receive this caption only. YouTube receives the title above and this text as its description.',
+    captionRouting: 'TikTok, Instagram and Facebook receive this caption only. YouTube receives the title above and this text as its description.',
     shortsEligible: '{{width}}×{{height}} · {{seconds}}s: meets the Shorts format requirements. YouTube determines classification after processing.',
     shortsIneligible: '{{width}}×{{height}} · {{seconds}}s: Shorts requires a square or vertical video up to 180 seconds.',
     openShorts: 'Open Shorts player',

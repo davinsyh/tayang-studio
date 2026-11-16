@@ -9,6 +9,7 @@ use std::{path::Path, sync::Mutex, time::Duration};
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 use crate::upload_progress::Progress;
+use crate::zernio_routes::{account_route, platforms, post_target};
 
 type R<T> = Result<T, String>;
 const ZERNIO: &str = "https://zernio.com/api/v1";
@@ -88,7 +89,10 @@ impl Hybrid {
         body: Option<Value>,
         key: Option<&str>,
     ) -> R<Value> {
-        let token = secret("zernio")?.ok_or("Isi API key Zernio terlebih dahulu")?;
+        self.z_for(1, method, path, body, key).await
+    }
+    async fn z_for(&self, slot: u8, method: Method, path: &str, body: Option<Value>, key: Option<&str>) -> R<Value> {
+        let token = secret(if slot == 2 { "zernio_secondary" } else { "zernio" })?.ok_or("Isi API key koneksi Zernio terlebih dahulu")?;
         let mut r = self
             .client
             .request(method, format!("{ZERNIO}{path}"))
@@ -103,29 +107,51 @@ impl Hybrid {
         }
         response(r.send().await).await
     }
+    async fn za(&self, account: &str, method: Method, path: &str, body: Option<Value>, key: Option<&str>) -> R<Value> {
+        let (slot, _) = account_route(account)?;
+        self.z_for(slot, method, path, body, key).await
+    }
+    fn youtube_delivery_elsewhere(&self, project: &str, account: &str) -> R<bool> {
+        let db = self.db.lock().map_err(|_| "Database busy")?;
+        let mut query = db.prepare("SELECT account,body FROM deliveries WHERE project=?1 AND account<>?2").map_err(|_|"Cannot read deliveries")?;
+        let rows = query.query_map(params![project,account], |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).map_err(|_|"Cannot read deliveries")?;
+        for row in rows {
+            let (id, raw) = row.map_err(|_|"Cannot read delivery")?;
+            let delivery: Value = serde_json::from_str(&raw).map_err(|_|"Invalid delivery")?;
+            if (id == "yt:own" || delivery["platform"] == "youtube") && (delivery["status"] != "failed" || delivery["providerId"].is_string()) { return Ok(true); }
+        }
+        Ok(false)
+    }
     pub async fn accounts(&self) -> R<Value> {
         let c = self.config()?;
         let mut accounts = Vec::new();
-        if secret("zernio")?.is_some() {
-            let profile = text(&c, "profileId");
+        let mut warnings = Vec::new();
+        for slot in [1u8, 2] {
+            if slot == 2 && c["secondaryEnabled"] != true { continue; }
+            if secret(if slot == 2 { "zernio_secondary" } else { "zernio" })?.is_none() { continue; }
+            let profile = text(&c, if slot == 2 { "secondaryProfileId" } else { "profileId" });
+            if profile.is_empty() { continue; }
             let path = format!(
-                "/accounts?profileId={}&platforms=tiktok,instagram",
-                encode(&profile)
+                "/accounts?profileId={}&platforms={}",
+                encode(&profile), platforms(slot).join(",")
             );
-            let out = self.z(Method::GET, &path, None, None).await?;
+            let out = match self.z_for(slot, Method::GET, &path, None, None).await {
+                Ok(out) => out,
+                Err(error) => { warnings.push(format!("Zernio {}: {error}", if slot == 2 { "B" } else { "A" })); continue; }
+            };
             for a in out["accounts"].as_array().into_iter().flatten() {
-                if !["tiktok", "instagram"].contains(&a["platform"].as_str().unwrap_or("")) {
+                if !platforms(slot).contains(&a["platform"].as_str().unwrap_or("")) {
                     continue;
                 }
-                accounts.push(json!({"id":format!("z:{}",text(a,"_id")),"platform":a["platform"],"username":a["username"],"profilePhotoUrl":null,"status":if a["isActive"].as_bool()==Some(false) {"disconnected"} else {"connected"}}));
+                accounts.push(json!({"id":format!("{}{}",if slot == 2 {"z2:"} else {"z:"},text(a,"_id")),"platform":a["platform"],"username":a["username"],"profilePhotoUrl":null,"status":if a["isActive"].as_bool()==Some(false) {"disconnected"} else {"connected"}}));
             }
         }
         if let Some(name) = c["youtubeName"].as_str() {
-            if secret("youtube_refresh")?.is_some() {
+            if secret("youtube_refresh")?.is_some() && !accounts.iter().any(|a|a["platform"] == "youtube" && a["status"] == "connected") {
                 accounts.push(json!({"id":"yt:own","platform":"youtube","username":name,"profilePhotoUrl":null,"status":"connected"}));
             }
         }
-        Ok(json!({"accounts":accounts}))
+        Ok(json!({"accounts":accounts,"warnings":warnings}))
     }
     async fn youtube_token(&self) -> R<String> {
         let c = self.config()?;
@@ -199,6 +225,7 @@ pub fn enabled(h: &Hybrid) -> bool {
 pub fn hybrid_settings(h: State<'_, Hybrid>) -> R<Value> {
     let mut c = h.config()?;
     c["hasZernioKey"] = json!(secret("zernio")?.is_some());
+    c["hasSecondaryZernioKey"] = json!(secret("zernio_secondary")?.is_some());
     c["youtubeConnected"] = json!(secret("youtube_refresh")?.is_some());
     Ok(c)
 }
@@ -210,6 +237,9 @@ pub async fn hybrid_save(
     client_id: String,
     api_key: Option<String>,
     client_secret: Option<String>,
+    secondary_enabled: Option<bool>,
+    secondary_profile_id: Option<String>,
+    secondary_api_key: Option<String>,
 ) -> R<()> {
     let _guard = h.gate.lock().await;
     if !profile_id.is_empty()
@@ -218,6 +248,19 @@ pub async fn hybrid_save(
         return Err("Profile ID Zernio harus berisi 24 digit hex".into());
     }
     let mut c = h.config()?;
+    if let Some(profile) = secondary_profile_id {
+        if !profile.is_empty() && (profile.len() != 24 || !profile.bytes().all(|x|x.is_ascii_hexdigit())) {
+            return Err("Profile ID Zernio B harus berisi 24 digit hex".into());
+        }
+        c["secondaryProfileId"] = json!(profile);
+    }
+    if let Some(enabled) = secondary_enabled {
+        if enabled && (text(&c,"secondaryProfileId").is_empty() || (secondary_api_key.as_ref().is_none_or(|key|key.trim().is_empty()) && secret("zernio_secondary")?.is_none())) {
+            return Err("Isi API key dan Profile ID Zernio B sebelum mengaktifkannya".into());
+        }
+        c["secondaryEnabled"] = json!(enabled);
+    }
+    if let Some(key) = secondary_api_key.filter(|key|!key.trim().is_empty()) { put_secret("zernio_secondary",key.trim())?; }
     if text(&c, "clientId") != client_id {
         KeyringStore
             .delete("hybrid:youtube_refresh")
@@ -340,16 +383,16 @@ pub async fn hybrid_creator(h: State<'_, Hybrid>, account_id: String) -> R<Value
     .await
 }
 pub async fn connect(app: &tauri::AppHandle, h: &Hybrid, platform: &str) -> R<()> {
-    if !["tiktok", "instagram"].contains(&platform) {
-        return Err("Hubungkan YouTube melalui pengaturan Hybrid".into());
-    }
-    let profile = text(&h.config()?, "profileId");
+    let slot = if ["tiktok","instagram"].contains(&platform) { 1 } else if ["youtube","facebook"].contains(&platform) { 2 } else { return Err("Platform tidak didukung".into()); };
+    let config = h.config()?;
+    if slot == 2 && config["secondaryEnabled"] != true { return Err("Aktifkan koneksi Zernio B terlebih dahulu".into()); }
+    let profile = text(&config, if slot == 2 {"secondaryProfileId"} else {"profileId"});
     if profile.is_empty() {
         return Err("Isi Profile ID Zernio".into());
     }
     let v = h
-        .z(
-            Method::GET,
+        .z_for(
+            slot, Method::GET,
             &format!(
                 "/connect/{platform}?profileId={}&scopes=posting",
                 encode(&profile)
@@ -375,10 +418,11 @@ pub async fn disconnect(h: &Hybrid, id: &str) -> R<()> {
         let mut c = h.config()?;
         c["youtubeName"] = Value::Null;
         h.save_config(&c)
-    } else if let Some(id) = id.strip_prefix("z:") {
-        h.z(
+    } else if id.starts_with("z:") || id.starts_with("z2:") {
+        let (slot, raw) = account_route(id)?;
+        h.z_for(slot,
             Method::DELETE,
-            &format!("/accounts/{}", encode(id)),
+            &format!("/accounts/{}", encode(raw)),
             None,
             None,
         )
@@ -439,6 +483,12 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
                 .and_then(|a| a["platform"].as_str()).unwrap_or("zernio")
         };
         input.progress.report(&input.project, id, platform, "preparing", 0, total);
+        if platform == "youtube" && h.delivery(&input.project,id)?.is_none_or(|old| old["status"] == "failed" && !old["providerId"].is_string()) && h.youtube_delivery_elsewhere(&input.project,id)? {
+            h.save_delivery(&input.project,id,&json!({"status":"failed","platform":"youtube","error":"Video ini sudah memiliki unggahan YouTube melalui koneksi lain. Periksa unggahan lama sebelum berpindah koneksi agar tidak terduplikasi."}))?;
+            input.progress.report(&input.project,id,platform,"failed",0,total);
+            failed = true;
+            continue;
+        }
         if let Some(old) = h.delivery(&input.project, id)? {
             match old["status"].as_str().unwrap_or("") {
                 "uploading" => {
@@ -458,8 +508,8 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
                     }
                     let key = text(&old, "key");
                     match h
-                        .z(
-                            Method::POST,
+                        .za(
+                            id, Method::POST,
                             "/posts",
                             Some(old["request"].clone()),
                             Some(&key),
@@ -468,7 +518,7 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
                     {
                         Ok(out) => {
                             if let Some(pid) = out["post"]["_id"].as_str() {
-                                h.save_delivery(&input.project,id,&json!({"status":out["post"]["status"],"providerId":pid,"provider":"zernio","at":old["at"]}))?;
+                                h.save_delivery(&input.project,id,&json!({"status":out["post"]["status"],"providerId":pid,"provider":"zernio","platform":old["platform"],"at":old["at"]}))?;
                                 input.progress.report(&input.project, id, platform, out["post"]["status"].as_str().unwrap_or("processing"), total, total);
                             } else {
                                 failed = true;
@@ -576,8 +626,8 @@ async fn zernio_post(
         .map_err(|_| "Video tidak ditemukan")?
         .len();
     let up = h
-        .z(
-            Method::POST,
+        .za(
+            id, Method::POST,
             "/media/presign",
             Some(json!({"filename":"video.mp4","contentType":"video/mp4","size":size})),
             None,
@@ -596,7 +646,8 @@ async fn zernio_post(
         .await
         .map_err(|_| "Upload Zernio gagal")?;
     input.progress.report(&input.project, id, platform, "processing", size, size);
-    let mut body = json!({"content":input.caption,"mediaItems":[{"type":"video","url":up["publicUrl"]}],"platforms":[{"platform":platform,"accountId":id.trim_start_matches("z:")}]});
+    let target = post_target(id,platform,&input.title,&input.privacy,input.made_for_kids,input.at.is_some())?;
+    let mut body = json!({"content":input.caption,"mediaItems":[{"type":"video","url":up["publicUrl"]}],"platforms":[target]});
     if let Some(at) = &input.at {
         body["scheduledFor"] = json!(at);
     } else {
@@ -606,15 +657,15 @@ async fn zernio_post(
         body["tiktokSettings"] = input.tiktok.clone().unwrap();
     }
     let key = format!("tayang-{}-{}", input.project, id);
-    h.save_delivery(&input.project,id,&json!({"status":"uncertain","error":"Permintaan Zernio sedang diproses; refresh status sebelum mengulang","key":key,"createdAt":chrono::Utc::now().timestamp(),"request":body,"at":input.at}))?;
-    match h.z(Method::POST, "/posts", Some(body), Some(&key)).await {
+    h.save_delivery(&input.project,id,&json!({"status":"uncertain","platform":platform,"error":"Permintaan Zernio sedang diproses; refresh status sebelum mengulang","key":key,"createdAt":chrono::Utc::now().timestamp(),"request":body,"at":input.at}))?;
+    match h.za(id, Method::POST, "/posts", Some(body), Some(&key)).await {
         Ok(out) => {
             let post = &out["post"];
             let pid = post["_id"]
                 .as_str()
                 .ok_or("Post ID Zernio belum diketahui")?;
             input.progress.report(&input.project, id, platform, post["status"].as_str().unwrap_or("processing"), size, size);
-            h.save_delivery(&input.project,id,&json!({"status":post["status"],"providerId":pid,"provider":"zernio","at":input.at}))
+            h.save_delivery(&input.project,id,&json!({"status":post["status"],"providerId":pid,"provider":"zernio","platform":platform,"at":input.at}))
         }
         Err(e) => {
             if [400, 401, 403, 404, 422]
@@ -833,8 +884,8 @@ pub async fn status(h: &Hybrid, post_id: &str, refresh: bool) -> R<Value> {
         let mut v: Value = serde_json::from_str(&raw).map_err(|_| "Status rusak")?;
         if refresh && v["provider"] == "zernio" {
             if let Ok(out) = h
-                .z(
-                    Method::GET,
+                .za(
+                    &account, Method::GET,
                     &format!("/posts/{}", encode(&text(&v, "providerId"))),
                     None,
                     None,

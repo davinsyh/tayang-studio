@@ -30,6 +30,9 @@ export function useCloudError() {
 export function SocialAccounts() {
   const { t } = useTranslation();
   const hybrid = useHybrid(s => s.settings?.enabled ?? false);
+  const secondaryEnabled = useHybrid(s => s.settings?.secondaryEnabled ?? false);
+  const secondaryProfileId = useHybrid(s => s.settings?.secondaryProfileId);
+  const warnings = useHybrid(s => s.connectionWarnings);
   const profileId = useHybrid(s => s.settings?.profileId);
   const youtubeConnected = useHybrid(s => s.settings?.youtubeConnected);
   const cloudSignedIn = useAuth((s) => !!s.status?.signedIn);
@@ -54,7 +57,7 @@ export function SocialAccounts() {
     if (u.status === 'fulfilled') setUsage(u.value);
     if (a.status === 'fulfilled') setAccounts(a.value);
     else setError(cloudErrorCode(a.reason));
-  }, [hybrid, profileId, youtubeConnected]);
+  }, [hybrid, profileId, youtubeConnected, secondaryEnabled, secondaryProfileId]);
 
   useEffect(() => {
     if (signedIn) void load();
@@ -131,7 +134,7 @@ export function SocialAccounts() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52 border-hairline bg-card">
-            {(hybrid ? (['tiktok', 'instagram'] as const) : SOCIAL_PLATFORMS).map((p) => (
+            {(hybrid ? (secondaryEnabled ? ['tiktok', 'instagram', 'youtube', 'facebook'] as const : ['tiktok', 'instagram'] as const) : SOCIAL_PLATFORMS).map((p) => (
               <DropdownMenuItem key={p} onSelect={() => void connect(p)} className="h-9 gap-2.5 text-[13px]">
                 <PlatformLogo platform={p} size={18} />
                 {platformName(p)}
@@ -198,6 +201,7 @@ export function SocialAccounts() {
           {t('cloud.finishInBrowser', { platform: platformName(connecting) })}
         </p>
       )}
+      {warnings.map(warning => <p key={warning} role="alert" className="m-0 text-xs text-orange-light">{warning}</p>)}
       {error && (
         <p role="alert" className="m-0 text-xs text-orange-light">
           {explain(error)}

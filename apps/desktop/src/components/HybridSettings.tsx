@@ -9,6 +9,9 @@ export function HybridSettingsPanel() {
   const settings = useHybrid((s) => s.settings);
   const [enabled, setEnabled] = useState(false);
   const [profileId, setProfileId] = useState("");
+  const [secondaryEnabled, setSecondaryEnabled] = useState(false);
+  const [secondaryProfileId, setSecondaryProfileId] = useState("");
+  const [secondaryApiKey, setSecondaryApiKey] = useState("");
   const [clientId, setClientId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -21,6 +24,8 @@ export function HybridSettingsPanel() {
   useEffect(() => {
     if (settings) {
       setEnabled(settings.enabled);
+      setSecondaryEnabled(settings.secondaryEnabled ?? false);
+      setSecondaryProfileId(settings.secondaryProfileId ?? "");
       setProfileId(settings.profileId);
       setClientId(settings.clientId);
     }
@@ -32,12 +37,16 @@ export function HybridSettingsPanel() {
     try {
       await hybridSave({
         enabled,
+        secondaryEnabled,
+        secondaryProfileId: secondaryProfileId.trim(),
+        secondaryApiKey: secondaryApiKey || undefined,
         profileId: profileId.trim(),
         clientId: clientId.trim(),
         apiKey: apiKey || undefined,
         clientSecret: clientSecret || undefined,
       });
       setApiKey("");
+      setSecondaryApiKey("");
       setClientSecret("");
       await useHybrid.getState().refresh();
       setSaved(true);
@@ -115,6 +124,22 @@ export function HybridSettingsPanel() {
           />
         </label>
       </div>
+      <fieldset className="flex flex-col gap-3 rounded-md border border-border p-3">
+        <legend className="px-1 text-sm font-medium">{t("hybrid.secondaryTitle")}</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={secondaryEnabled} onChange={e => { setSecondaryEnabled(e.target.checked); setSaved(false); }} disabled={busy} />
+          {t("hybrid.secondaryEnabled")}
+        </label>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm">{t("hybrid.secondaryKey")}
+            <Input type="password" autoComplete="off" value={secondaryApiKey} onChange={e => setSecondaryApiKey(e.target.value)} placeholder={settings?.hasSecondaryZernioKey ? t("hybrid.savedKey") : ""} disabled={busy} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">{t("hybrid.secondaryProfile")}
+            <Input value={secondaryProfileId} onChange={e => setSecondaryProfileId(e.target.value)} disabled={busy} />
+          </label>
+        </div>
+        <p className="m-0 text-xs text-text-3">{t("hybrid.secondaryHint")}</p>
+      </fieldset>
       <p className="m-0 text-xs text-text-3">{t("hybrid.setupHint")}</p>
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={busy} onClick={() => void save()}>

@@ -72,3 +72,22 @@ it("requires creator privacy selection and explicit per-video TikTok consent", a
   );
   expect(screen.getByLabelText("Allow duet")).toBeDisabled();
 });
+
+it("keeps the second connection's credentials separate and clears its key", async () => {
+  vi.mocked(invoke).mockImplementation(async command => command === "hybrid_settings" ? {
+    enabled: true, profileId: "012345678901234567890123", clientId: "", hasZernioKey: true,
+    secondaryEnabled: false, secondaryProfileId: "", hasSecondaryZernioKey: false, youtubeConnected: true,
+  } : undefined);
+  render(<HybridSettingsPanel />);
+  const user = userEvent.setup();
+  await waitFor(() => expect(screen.getByLabelText("Zernio Profile ID")).toHaveValue("012345678901234567890123"));
+  const key = screen.getByLabelText("Zernio B API key");
+  await user.type(key, "secondary-test-key");
+  await user.type(screen.getByLabelText("Zernio B Profile ID"), "abcdef012345678901234567");
+  await user.click(screen.getByLabelText("Enable connection B"));
+  await user.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("hybrid_save", expect.objectContaining({
+    secondaryEnabled: true, secondaryApiKey: "secondary-test-key", secondaryProfileId: "abcdef012345678901234567", apiKey: undefined,
+  })));
+  expect(key).toHaveValue("");
+});

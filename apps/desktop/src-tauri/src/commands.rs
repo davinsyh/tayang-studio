@@ -928,7 +928,7 @@ pub async fn social_connect(hybrid: State<'_, crate::hybrid::Hybrid>, app: AppHa
 
 #[tauri::command]
 pub async fn social_disconnect(hybrid: State<'_, crate::hybrid::Hybrid>, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, id: String) -> CmdResult<()> {
-    if id.starts_with("z:") || id == "yt:own" { return crate::hybrid::disconnect(&hybrid, &id).await; }
+    if id.starts_with("z:") || id.starts_with("z2:") || id == "yt:own" { return crate::hybrid::disconnect(&hybrid, &id).await; }
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
     let path = format!("/v1/social/accounts/{}", urlencode(&id));

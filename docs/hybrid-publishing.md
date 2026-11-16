@@ -59,3 +59,13 @@ References: https://docs.zernio.com/guides/media-uploads ; https://docs.zernio.c
 ## Windows GNU desktop build
 
 The library target uses `rlib` only, which the desktop executable links directly. Building an additional `cdylib` with the Windows GNU linker exported more symbols than its ordinal limit (`export ordinal too large`). `cargo build --bin tayang-studio -j 1` now succeeds, and `pnpm dev:desktop` was observed opening the Tayang Studio Dev window on this Windows machine. Mobile embedding would need its own static/shared library build configuration.
+
+## Optional second Zernio connection
+
+Connection A keeps the existing TikTok/Instagram API key and profile. In the same settings panel, enter connection B's API key and Profile ID, enable B and save. Connect YouTube and Facebook from Social accounts or the second Zernio dashboard. Facebook must be a Page with the required permissions. Credentials remain separate in the OS keychain (`hybrid:zernio_secondary` for B). Existing A IDs and delivery records remain unchanged; B destinations use a `z2:` prefix so status polling and retries use the correct key.
+
+Once a connected YouTube account exists on B, direct Google is hidden from destinations to prevent selecting both. Its credentials remain saved as a fallback. An existing YouTube delivery on another connection blocks a duplicate upload for that project; inspect the original result instead. Captions go to TikTok, Instagram and Facebook; YouTube receives a separate title and the caption as description. B sends Facebook videos with `contentType: reel`. Platform media requirements still apply.
+
+Each connection reports account-list failures without hiding working destinations from the other connection. Missing or inactive B does not erase direct YouTube credentials. Keys are never returned to the settings page, only presence flags.
+
+Using multiple accounts does not establish entitlement to additional free quota. Review Zernio's current terms and pricing; this fork does not bypass provider limits or guarantee free service. Avoid posting a live video merely to test configuration. `cargo test --test zernio-routes` checks account/key routing boundaries and platform payloads without the desktop test runtime.

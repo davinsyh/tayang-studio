@@ -23,6 +23,7 @@ pub mod trace;
 pub mod usage;
 pub mod upload_progress;
 mod upload_stream;
+mod zernio_routes;
 pub mod voice;
 
 use commands::AppState;
