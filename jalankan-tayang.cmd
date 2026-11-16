@@ -1,4 +1,3 @@
 @echo off
-cd /d "%~dp0"
-call "%APPDATA%\npm\pnpm.cmd" dev:desktop
-if errorlevel 1 pause
+start "" "%SystemRoot%\System32\wscript.exe" "%~dp0scripts\open-desktop.vbs"
+exit /b

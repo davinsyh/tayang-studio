@@ -38,6 +38,8 @@ Use `pnpm install --frozen-lockfile` then `pnpm dev:desktop`. On this personal f
 
 On Windows this checkout is at `C:\Project Video\tayang-studio`. You can also double-click `jalankan-tayang.cmd`. The development launcher uses the target folder's Windows short path to work around GNU windres include paths containing spaces; build files still live inside this checkout.
 
+The Desktop and Start Menu shortcuts named **Tayang Studio Pribadi** use `scripts/open-desktop.vbs` and `scripts/open-desktop.ps1`. They start the development service without a console window and bring an existing personal-build window forward. Launch logs are stored under `%LOCALAPPDATA%\Tayang-Studio-Pribadi\logs`. The shortcut leaves the official application's shortcut unchanged. Closing the app stops the development session; opening the shortcut starts it again.
+
 The active data folder is `%APPDATA%\app.tayang.studio`. Chat/style/project data stays in the original `tayang.db`; the separate `publishing.db` was moved from the old Dev folder. Hybrid credentials use the same Windows Credential Manager service across both application identifiers, so they do not need to be copied as plaintext. Back up the data folder before switching builds or importing upstream database migrations. Single-instance activation prevents normal side-by-side launches of the two builds with this identifier; do not bypass it.
 
 ## Validation limits
