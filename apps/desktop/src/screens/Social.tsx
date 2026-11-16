@@ -14,6 +14,8 @@ import { listProjects } from '@/lib/ipc';
 import { openProjectChat } from '@/lib/openProject';
 import { useApp } from '@/state/app';
 import { useAuth } from '@/state/auth';
+import { HybridSettingsPanel } from '@/components/HybridSettings';
+import { useHybrid } from '@/lib/hybrid';
 
 const when = (iso: string | null | undefined) => {
   const d = iso ? new Date(iso) : null;
@@ -37,7 +39,8 @@ export function Social() {
     void useAuth.getState().init();
   }, []);
 
-  const signedIn = !!status?.signedIn;
+  const hybrid = useHybrid(s => s.settings?.enabled ?? false);
+  const signedIn = !!status?.signedIn || hybrid;
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
@@ -60,6 +63,7 @@ export function Social() {
         <span className="text-sm text-text-2">{t('social.subtitle')}</span>
       </div>
 
+      <HybridSettingsPanel />
       {!signedIn ? (
         <div className="flex flex-col items-center gap-4 py-16 text-center">
           <Oyen mood="wink" size={56} />

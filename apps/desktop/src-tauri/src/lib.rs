@@ -5,6 +5,7 @@ pub mod auth;
 pub mod claude_account;
 pub mod billing;
 pub mod cloud;
+pub mod hybrid;
 pub mod commands;
 pub mod db;
 pub mod device;
@@ -58,6 +59,7 @@ pub fn run() {
             commands::allow_asset_folders(app.handle(), &db, &working);
             commands::allow_style_media(app.handle());
             media::sweep_study_dirs(std::path::Path::new(&working));
+            app.manage(hybrid::Hybrid::new(&data.join("publishing.db")).map_err(std::io::Error::other)?);
             app.manage(usage::UsageCache::default());
             app.manage(commands::ClaudeSignIn::default());
             app.manage(commands::ApiKeys::new(&data));
@@ -156,6 +158,10 @@ pub fn run() {
             commands::agent_models,
             commands::api_url_override,
             commands::cloud_usage,
+            hybrid::hybrid_settings,
+            hybrid::hybrid_save,
+            hybrid::hybrid_youtube_connect,
+            hybrid::hybrid_creator,
             commands::social_accounts,
             commands::social_connect,
             commands::social_disconnect,

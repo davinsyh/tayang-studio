@@ -10,6 +10,7 @@ import { cloudErrorCode, cloudUsage, platformName, socialAccounts, socialConnect
 import { useApp } from '@/state/app';
 import { useAuth } from '@/state/auth';
 import { track } from '@/lib/analytics';
+import { useHybrid } from '@/lib/hybrid';
 
 /** After "Connect", look for the new account this often, for this long (the user signs in in the browser). */
 const WATCH_EVERY_MS = 4000;
@@ -28,7 +29,9 @@ export function useCloudError() {
  */
 export function SocialAccounts() {
   const { t } = useTranslation();
-  const signedIn = useAuth((s) => !!s.status?.signedIn);
+  const hybrid = useHybrid(s => s.settings?.enabled ?? false);
+  const cloudSignedIn = useAuth((s) => !!s.status?.signedIn);
+  const signedIn = cloudSignedIn || hybrid;
   const navigate = useApp((s) => s.navigate);
   const explain = useCloudError();
   const [usage, setUsage] = useState<UsageResponse | null>(null);
@@ -44,12 +47,12 @@ export function SocialAccounts() {
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
-    const [u, a] = await Promise.allSettled([cloudUsage(), socialAccounts()]);
+    const [u, a] = await Promise.allSettled([hybrid ? Promise.resolve(null) : cloudUsage(), socialAccounts()]);
     setLoading(false);
     if (u.status === 'fulfilled') setUsage(u.value);
     if (a.status === 'fulfilled') setAccounts(a.value);
     else setError(cloudErrorCode(a.reason));
-  }, []);
+  }, [hybrid]);
 
   useEffect(() => {
     if (signedIn) void load();
@@ -100,7 +103,7 @@ export function SocialAccounts() {
     }
   };
 
-  const noPosts = usage !== null && usage.posts.allowance === 0;
+  const noPosts = !hybrid && usage !== null && usage.posts.allowance === 0;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-2">
@@ -126,7 +129,7 @@ export function SocialAccounts() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52 border-hairline bg-card">
-            {SOCIAL_PLATFORMS.map((p) => (
+            {(hybrid ? (['tiktok', 'instagram'] as const) : SOCIAL_PLATFORMS).map((p) => (
               <DropdownMenuItem key={p} onSelect={() => void connect(p)} className="h-9 gap-2.5 text-[13px]">
                 <PlatformLogo platform={p} size={18} />
                 {platformName(p)}

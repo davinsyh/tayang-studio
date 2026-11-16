@@ -16,6 +16,8 @@ import { listProjects } from '@/lib/ipc';
 import { captionOf, readPostDraft, TITLE_MAX, type PostDraft } from '@/lib/postDraft';
 import { useApp } from '@/state/app';
 import { track } from '@/lib/analytics';
+import { useHybrid } from '@/lib/hybrid';
+import { TikTokOptions } from '@/components/HybridPostOptions';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateValue = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -46,6 +48,12 @@ export function PostDialog({
   agentBusy?: boolean;
 }) {
   const { t } = useTranslation();
+  const hybrid = useHybrid(s => s.settings?.enabled ?? false);
+  const [tiktokSettings, setTiktokSettings] = useState<Record<string,unknown>>();
+  const [youtubePrivacy, setYoutubePrivacy] = useState('private');
+  const [kids, setKids] = useState(false);
+  const [hybridError, setHybridError] = useState('');
+  useEffect(() => { if(open) void useHybrid.getState().refresh(); }, [open]);
   const explain = useCloudError();
   const navigate = useApp((s) => s.navigate);
   const [accounts, setAccounts] = useState<SocialAccount[] | null>(null);
@@ -66,6 +74,8 @@ export function PostDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setHybridError('');
+    setTiktokSettings(undefined);
     setDetails(null);
     setTitle(project.title);
     setCaption(project.title);
@@ -142,13 +152,15 @@ export function PostDialog({
   const writing = asked && agentBusy;
 
   const at = later ? localToIso(date, time) : null;
-  const canPost = phase.kind === 'form' && picked.size > 0 && caption.trim().length > 0 && (!later || !!at);
+  const tiktokAccount = accounts?.find(a => a.id.startsWith('z:') && a.platform === 'tiktok' && picked.has(a.id));
+  const canPost = (!tiktokAccount || !!tiktokSettings) && phase.kind === 'form' && picked.size > 0 && caption.trim().length > 0 && (!later || !!at);
 
   const post = async () => {
     setError(null);
+    setHybridError('');
     setPhase({ kind: 'posting' });
     try {
-      const result = await socialPost({ projectId: project.id, title: title.trim() || null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId });
+      const result = await socialPost({ projectId: project.id, title: title.trim() || null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId, ...(hybrid ? {tiktokSettings,youtubePrivacy,youtubeMadeForKids:kids} : {}) });
       setPhase({ kind: 'done', result });
       track('video posted', {
         accounts: picked.size,
@@ -163,7 +175,11 @@ export function PostDialog({
         .catch(() => {});
     } catch (e) {
       // The same request id stays for the retry: a post that did go out is found, not made again.
-      setError(cloudErrorCode(e));
+      if(hybrid) {
+        setHybridError(String(e));
+        void socialPostStatus(`hybrid:${project.id}`).then(setDetails).catch(()=>{});
+        useApp.getState().bumpProjects();
+      } else setError(cloudErrorCode(e));
       track('video post failed', { error: cloudErrorCode(e) });
       setPhase({ kind: 'form' });
     }
@@ -192,10 +208,10 @@ export function PostDialog({
 
         {phase.kind === 'done' ? (
           <p role="status" className="m-0 text-sm">
-            {phase.result.status === 'scheduled'
+            {hybrid ? (t('hybrid.requestSaved')) : phase.result.status === 'scheduled'
               ? t('post.scheduled', { count: phase.result.postsCharged })
               : t('post.posted', { count: phase.result.postsCharged })}
-            <span className="block pt-1 text-xs text-text-3">{t('post.postsLeft', { count: phase.result.usage.remaining })}</span>
+            {!hybrid && <span className="block pt-1 text-xs text-text-3">{t('post.postsLeft', { count: phase.result.usage.remaining })}</span>}
           </p>
         ) : accounts === null ? (
           <p role="status" className="m-0 flex items-center gap-2 text-xs text-text-3">
@@ -209,7 +225,7 @@ export function PostDialog({
               variant="secondary"
               onClick={() => {
                 onOpenChange(false);
-                navigate({ name: 'settings' });
+                navigate({ name: hybrid ? 'social' : 'settings' });
               }}
             >
               {t('post.connectFirst')}
@@ -271,7 +287,13 @@ export function PostDialog({
                 </div>
               )}
             </div>
-            <p className="m-0 text-xs text-text-3">{t('post.cost', { count: picked.size })}</p>
+            {tiktokAccount && <TikTokOptions key={tiktokAccount.id} accountId={tiktokAccount.id} contentKey={`${title}\n${caption}`} onChange={setTiktokSettings}/> }
+            {hybrid && picked.has('yt:own') && <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm"><legend>YouTube</legend>
+              <label className="flex flex-col gap-1">{t('hybrid.youtubePrivacy')}<select className="rounded border border-border bg-card p-2" value={youtubePrivacy} onChange={e=>setYoutubePrivacy(e.target.value)}><option value="private">{t('hybrid.private')}</option><option value="unlisted">{t('hybrid.unlisted')}</option><option value="public">{t('hybrid.public')}</option></select></label>
+              {later && <p className="m-0 text-xs text-text-2">{t('hybrid.scheduleHint')}</p>}
+              <label className="flex items-center gap-2"><input type="checkbox" checked={kids} onChange={e=>setKids(e.target.checked)}/>{t('hybrid.kids')}</label>
+            </fieldset>}
+            <p className="m-0 text-xs text-text-3">{hybrid ? (t('hybrid.ownAccounts')) : t('post.cost', { count: picked.size })}</p>
           </div>
         )}
 
@@ -299,6 +321,7 @@ export function PostDialog({
           </ul>
         )}
 
+        {hybridError && <p role="alert" className="m-0 text-sm text-orange-light">{hybridError}</p>}
         {error && (
           <div role="alert" className="flex flex-wrap items-center gap-3 text-xs text-orange-light">
             {explain(error)}

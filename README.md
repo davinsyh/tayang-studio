@@ -1,5 +1,8 @@
 # Tayang Studio
 
+This fork adds personal Hybrid publishing: Zernio for TikTok/Instagram and direct YouTube uploads. See [setup and limitations](docs/hybrid-publishing.md).
+
+
 Tayang Studio is a free, open-source desktop app that helps Indonesian creators make motion videos without writing prompts. It picks topics, writes scripts and handles the prompting, while the user's own AI agent (Claude Code, opencode, Gemini CLI, Codex, Antigravity CLI or any ACP agent) does the building.
 
 ![A Tayang Studio chat: the agent's plan and frame check on the left, the finished 3D cartoon video in the preview on the right](docs/screenshots/chat.webp)

@@ -905,7 +905,8 @@ pub async fn redeem_gift_code(state: State<'_, AppState>, auth: State<'_, Arc<Au
 
 /// The social accounts connected to this Tayang account.
 #[tauri::command]
-pub async fn social_accounts(state: State<'_, AppState>, auth: State<'_, Arc<Auth>>) -> CmdResult<serde_json::Value> {
+pub async fn social_accounts(hybrid: State<'_, crate::hybrid::Hybrid>, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>) -> CmdResult<serde_json::Value> {
+    if crate::hybrid::enabled(&hybrid) { return hybrid.accounts().await; }
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
     after_cloud(&auth, &base, "accounts", crate::cloud::get(auth.client(), &base, &token, "/v1/social/accounts").await)
@@ -914,7 +915,8 @@ pub async fn social_accounts(state: State<'_, AppState>, auth: State<'_, Arc<Aut
 /// Opens the platform's sign-in page in the browser to connect an account; it shows up in
 /// `social_accounts` once the user has finished there.
 #[tauri::command]
-pub async fn social_connect(app: AppHandle, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, platform: String) -> CmdResult<()> {
+pub async fn social_connect(hybrid: State<'_, crate::hybrid::Hybrid>, app: AppHandle, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, platform: String) -> CmdResult<()> {
+    if crate::hybrid::enabled(&hybrid) { return crate::hybrid::connect(&app, &hybrid, &platform).await; }
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
     let body = serde_json::json!({ "platform": platform });
@@ -925,7 +927,8 @@ pub async fn social_connect(app: AppHandle, state: State<'_, AppState>, auth: St
 }
 
 #[tauri::command]
-pub async fn social_disconnect(state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, id: String) -> CmdResult<()> {
+pub async fn social_disconnect(hybrid: State<'_, crate::hybrid::Hybrid>, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, id: String) -> CmdResult<()> {
+    if id.starts_with("z:") || id == "yt:own" { return crate::hybrid::disconnect(&hybrid, &id).await; }
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
     let path = format!("/v1/social/accounts/{}", urlencode(&id));
@@ -955,6 +958,10 @@ pub fn title_configurations(title: Option<&str>) -> Option<serde_json::Value> {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // a Tauri command takes its fields as arguments
 pub async fn social_post(
+    hybrid: State<'_, crate::hybrid::Hybrid>,
+    tiktok_settings: Option<serde_json::Value>,
+    youtube_privacy: Option<String>,
+    youtube_made_for_kids: Option<bool>,
     state: State<'_, AppState>,
     auth: State<'_, Arc<Auth>>,
     project_id: String,
@@ -964,6 +971,21 @@ pub async fn social_post(
     scheduled_at: Option<String>,
     client_request_id: String,
 ) -> CmdResult<serde_json::Value> {
+    if crate::hybrid::enabled(&hybrid) {
+        let folder = project_folder(&state, &project_id)?;
+        let video = media::latest_render(&folder).ok_or("Render video terlebih dahulu")?;
+        let post_id = format!("hybrid:{project_id}");
+        let result = crate::hybrid::post(&hybrid, &video, crate::hybrid::PostInput {
+            project: project_id.clone(), title: title.unwrap_or_else(|| "Video".into()), caption,
+            accounts: account_ids, at: scheduled_at, tiktok: tiktok_settings,
+            privacy: youtube_privacy.unwrap_or_else(|| "private".into()), made_for_kids: youtube_made_for_kids.unwrap_or(false),
+        }).await;
+        // Preserve the group even after partial failure so users can inspect every destination.
+        if crate::hybrid::status(&hybrid, &post_id, false).await.is_ok_and(|v|v["results"].as_array().is_some_and(|r|!r.is_empty())) {
+            state.db.update_project(&project_id, serde_json::json!({"socialPostId":post_id})).map_err(err)?;
+        }
+        return result;
+    }
     use crate::cloud::CloudError;
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
@@ -1003,7 +1025,8 @@ pub async fn social_post(
 
 /// One auto-post and how it went on each account.
 #[tauri::command]
-pub async fn social_post_status(state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, post_id: String) -> CmdResult<serde_json::Value> {
+pub async fn social_post_status(hybrid: State<'_, crate::hybrid::Hybrid>, state: State<'_, AppState>, auth: State<'_, Arc<Auth>>, post_id: String) -> CmdResult<serde_json::Value> {
+    if post_id.starts_with("hybrid:") { return crate::hybrid::status(&hybrid, &post_id, true).await; }
     let auth = auth.inner().clone();
     let (base, token) = cloud_token(&state, &auth).await?;
     let path = format!("/v1/social/posts/{}", urlencode(&post_id));
