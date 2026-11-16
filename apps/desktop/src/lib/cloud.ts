@@ -1,4 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
+import type { PostUploadProgress } from './uploadProgress';
 import type { CreatePostResponse, PostDetails, RedeemResponse, SocialAccount, SocialPlatform, UsageResponse } from '@tayang/shared';
 
 /** What a cloud call can fail with: the kebab-case `CloudError` from Rust, or `other`. */
@@ -44,8 +45,16 @@ export const socialAccounts = () => invoke<{ accounts: SocialAccount[] }>('socia
 export const socialConnect = (platform: SocialPlatform) => invoke<void>('social_connect', { platform });
 export const socialDisconnect = (id: string) => invoke<void>('social_disconnect', { id });
 /** Uploads the project's latest render and posts it; pass the same `clientRequestId` to retry. */
-export const socialPost = (o: { projectId: string; title?: string | null; caption: string; accountIds: string[]; scheduledAt: string | null; clientRequestId: string; tiktokSettings?: Record<string, unknown>; youtubePrivacy?: string; youtubeMadeForKids?: boolean }) =>
-  invoke<CreatePostResponse>('social_post', o);
+export const socialPost = async (o: { projectId: string; title?: string | null; caption: string; accountIds: string[]; scheduledAt: string | null; clientRequestId: string; tiktokSettings?: Record<string, unknown>; youtubePrivacy?: string; youtubeMadeForKids?: boolean; onProgress?: (progress: PostUploadProgress) => void }) => {
+  const { onProgress, ...args } = o;
+  const channel = onProgress ? new Channel<PostUploadProgress>() : null;
+  if (channel && onProgress) channel.onmessage = onProgress;
+  try {
+    return await invoke<CreatePostResponse>('social_post', { ...args, ...(channel ? { onProgress: channel } : {}) });
+  } finally {
+    if (channel) channel.onmessage = () => {};
+  }
+};
 export const socialPostStatus = (postId: string) => invoke<PostDetails>('social_post_status', { postId });
 
 export const PLATFORM_NAMES: Record<string, string> = {

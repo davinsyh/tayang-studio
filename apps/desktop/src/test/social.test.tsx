@@ -156,6 +156,26 @@ describe('PostDialog', () => {
     vi.mocked(readProjectFile).mockRejectedValue('no file');
   });
 
+  it('shows progress from this upload only and hides editable fields until the request finishes', async () => {
+    useHybrid.setState({ settings: { enabled: true, profileId: 'default', clientId: 'desktop', hasZernioKey: true, youtubeConnected: true } });
+    vi.mocked(cloud.socialAccounts).mockResolvedValue([acct('yt:own', 'youtube', 'creator')]);
+    let finish!: (result: Awaited<ReturnType<typeof cloud.socialPost>>) => void;
+    vi.mocked(cloud.socialPost).mockImplementation(args => {
+      args.onProgress?.({ projectId: 'another-project', accountId: 'yt:own', platform: 'youtube', stage: 'uploading', sent: 99, total: 100 });
+      args.onProgress?.({ projectId: project.id, accountId: 'yt:own', platform: 'youtube', stage: 'uploading', sent: 50, total: 100 });
+      return new Promise(resolve => { finish = resolve; });
+    });
+    vi.mocked(cloud.socialPostStatus).mockResolvedValue({ postId: 'hybrid:p1', status: 'published', scheduledAt: null, results: [] });
+    open();
+    await screen.findByText('@creator');
+    await userEvent.click(screen.getByRole('button', { name: 'Post now' }));
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.queryByText('99%')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Caption & hashtags')).not.toBeInTheDocument();
+    await act(async () => { finish({ postId: 'hybrid:p1', status: 'published', postsCharged: 0, usage: { allowance: 0, used: 0, remaining: 0 } }); });
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+  });
+
   it('refreshes a publishing TikTok delivery to completion without sending the video again', async () => {
     vi.mocked(invoke).mockResolvedValue({ privacyLevels: [], postingLimits: { interactionSettings: {} } });
     vi.mocked(cloud.socialAccounts).mockResolvedValue([acct('z:tt', 'tiktok', 'ttcreator')]);

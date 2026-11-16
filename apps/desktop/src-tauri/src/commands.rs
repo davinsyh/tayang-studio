@@ -958,6 +958,8 @@ pub fn title_configurations(title: Option<&str>) -> Option<serde_json::Value> {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // a Tauri command takes its fields as arguments
 pub async fn social_post(
+    webview: tauri::Webview,
+    on_progress: Option<tauri::ipc::JavaScriptChannelId>,
     hybrid: State<'_, crate::hybrid::Hybrid>,
     tiktok_settings: Option<serde_json::Value>,
     youtube_privacy: Option<String>,
@@ -971,11 +973,16 @@ pub async fn social_post(
     scheduled_at: Option<String>,
     client_request_id: String,
 ) -> CmdResult<serde_json::Value> {
+    let channel: Option<tauri::ipc::Channel<crate::upload_progress::UploadProgress>> = on_progress.map(|id| id.channel_on(webview));
+    let progress = crate::upload_progress::Progress::new(move |event| {
+        if let Some(channel) = &channel { let _ = channel.send(event); }
+    });
     if crate::hybrid::enabled(&hybrid) {
         let folder = project_folder(&state, &project_id)?;
         let video = media::latest_render(&folder).ok_or("Render video terlebih dahulu")?;
         let post_id = format!("hybrid:{project_id}");
         let result = crate::hybrid::post(&hybrid, &video, crate::hybrid::PostInput {
+            progress,
             project: project_id.clone(), title: title.unwrap_or_else(|| "Video".into()), caption,
             accounts: account_ids, at: scheduled_at, tiktok: tiktok_settings,
             privacy: youtube_privacy.unwrap_or_else(|| "private".into()), made_for_kids: youtube_made_for_kids.unwrap_or(false),
@@ -992,11 +999,17 @@ pub async fn social_post(
     let folder = project_folder(&state, &project_id)?;
     let video = media::latest_render(&folder).ok_or("This video has no render yet: render it first")?;
     let client = auth.client();
+    progress.report(&project_id, "cloud", "cloud", "preparing", 0, 0);
     let up = after_cloud(&auth, &base, "upload url", crate::cloud::send(client, reqwest::Method::POST, &base, &token, "/v1/social/media/upload-url", Some(&serde_json::json!({}))).await)?;
     let (Some(upload_url), Some(media_url)) = (up.get("uploadUrl").and_then(serde_json::Value::as_str), up.get("mediaUrl").and_then(serde_json::Value::as_str)) else {
         return Err(cloud_err(CloudError::Server));
     };
-    after_cloud(&auth, &base, "upload", crate::cloud::upload(client, upload_url, &video, "video/mp4").await)?;
+    let transfer = progress.clone();
+    let uploading_project = project_id.clone();
+    after_cloud(&auth, &base, "upload", crate::cloud::upload_with_progress(client, upload_url, &video, "video/mp4", move |sent, total| {
+        transfer.report(&uploading_project, "cloud", "cloud", "uploading", sent, total);
+    }).await)?;
+    progress.report(&project_id, "cloud", "cloud", "processing", 0, 0);
     let mut body = serde_json::json!({
         "caption": caption,
         "socialAccountIds": account_ids,

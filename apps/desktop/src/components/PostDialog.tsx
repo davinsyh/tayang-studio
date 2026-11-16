@@ -20,6 +20,8 @@ import { useApp } from '@/state/app';
 import { track } from '@/lib/analytics';
 import { useHybrid } from '@/lib/hybrid';
 import { TikTokOptions } from '@/components/HybridPostOptions';
+import { PostUploadProgressPanel } from '@/components/PostUploadProgress';
+import type { PostUploadProgress } from '@/lib/uploadProgress';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateValue = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -70,6 +72,7 @@ export function PostDialog({
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
+  const [uploadProgress, setUploadProgress] = useState<Record<string, PostUploadProgress>>({});
   const [error, setError] = useState<CloudErrorCode | null>(null);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [details, setDetails] = useState<PostDetails | null>(null);
@@ -104,6 +107,7 @@ export function PostDialog({
     setLater(!!project.scheduledAt && new Date(project.scheduledAt).getTime() > Date.now());
     setRequestId(crypto.randomUUID());
     setPhase({ kind: 'form' });
+    setUploadProgress({});
     let alive = true;
     void mediaProbe(project.id).then((info) => alive && setMedia(info)).catch(() => {});
     socialAccounts()
@@ -179,8 +183,11 @@ export function PostDialog({
     setError(null);
     setHybridError('');
     setPhase({ kind: 'posting' });
+    setUploadProgress({});
     try {
-      const result = await socialPost({ projectId: project.id, title: (!hybrid || youtubeSelected) ? title.trim() || null : null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId, ...(hybrid ? {tiktokSettings,youtubePrivacy,youtubeMadeForKids:kids} : {}) });
+      const result = await socialPost({ projectId: project.id, title: (!hybrid || youtubeSelected) ? title.trim() || null : null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId, onProgress: (event) => {
+        if (event.projectId === project.id) setUploadProgress(previous => ({ ...previous, [event.accountId]: event }));
+      }, ...(hybrid ? {tiktokSettings,youtubePrivacy,youtubeMadeForKids:kids} : {}) });
       setPhase({ kind: 'done', result });
       track('video posted', {
         accounts: picked.size,
@@ -234,6 +241,8 @@ export function PostDialog({
               : t('post.posted', { count: phase.result.postsCharged })}
             {!hybrid && <span className="block pt-1 text-xs text-text-3">{t('post.postsLeft', { count: phase.result.usage.remaining })}</span>}
           </p>
+        ) : phase.kind === 'posting' ? (
+          <PostUploadProgressPanel accounts={hybrid ? (accounts ?? []).filter(account => picked.has(account.id)) : [{ id: 'cloud', platform: 'cloud', username: null }]} progress={uploadProgress} />
         ) : accounts === null ? (
           <p role="status" className="m-0 flex items-center gap-2 text-xs text-text-3">
             <Spinner size={12} />

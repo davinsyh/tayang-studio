@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Mutex, time::Duration};
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
+use crate::upload_progress::Progress;
 
 type R<T> = Result<T, String>;
 const ZERNIO: &str = "https://zernio.com/api/v1";
@@ -404,6 +405,7 @@ fn youtube_metadata(
 }
 #[derive(Clone)]
 pub struct PostInput {
+    pub progress: Progress,
     pub project: String,
     pub title: String,
     pub caption: String,
@@ -429,17 +431,25 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
         }
     }
     let accounts = h.accounts().await?;
+    let total = std::fs::metadata(file).map_err(|_| "Video tidak ditemukan")?.len();
     let mut failed = false;
     for id in &input.accounts {
+        let platform = if id == "yt:own" { "youtube" } else {
+            accounts["accounts"].as_array().and_then(|items| items.iter().find(|a| a["id"].as_str() == Some(id.as_str())))
+                .and_then(|a| a["platform"].as_str()).unwrap_or("zernio")
+        };
+        input.progress.report(&input.project, id, platform, "preparing", 0, total);
         if let Some(old) = h.delivery(&input.project, id)? {
             match old["status"].as_str().unwrap_or("") {
                 "uploading" => {
-                    if resume_youtube(h, file, &input.project, id).await.is_err() {
+                    if resume_youtube(h, file, &input.project, id, &input.progress).await.is_err() {
+                        input.progress.report(&input.project, id, platform, "failed", 0, total);
                         failed = true;
                     }
                     continue;
                 }
                 "uncertain" => {
+                    input.progress.report(&input.project, id, platform, "checking", total, total);
                     let age =
                         chrono::Utc::now().timestamp() - old["createdAt"].as_i64().unwrap_or(0);
                     if age > 23 * 3600 {
@@ -459,6 +469,7 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
                         Ok(out) => {
                             if let Some(pid) = out["post"]["_id"].as_str() {
                                 h.save_delivery(&input.project,id,&json!({"status":out["post"]["status"],"providerId":pid,"provider":"zernio","at":old["at"]}))?;
+                                input.progress.report(&input.project, id, platform, out["post"]["status"].as_str().unwrap_or("processing"), total, total);
                             } else {
                                 failed = true;
                             }
@@ -470,11 +481,15 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
                     continue;
                 }
                 "failed" if old["providerId"].is_string() => {
+                    input.progress.report(&input.project, id, platform, "failed", 0, total);
                     failed = true;
                     continue;
                 }
                 "failed" => {}
-                _ => continue,
+                state => {
+                    input.progress.report(&input.project, id, platform, state, total, total);
+                    continue;
+                },
             }
         }
         let account = accounts["accounts"]
@@ -485,6 +500,7 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
         if platform == "tiktok" {
             if let Err(e) = validate_tiktok(h, &input, id).await {
                 h.save_delivery(&input.project, id, &json!({"status":"failed","error":e}))?;
+                input.progress.report(&input.project, id, &platform, "failed", 0, total);
                 failed = true;
                 continue;
             }
@@ -495,6 +511,7 @@ pub async fn post(h: &Hybrid, file: &Path, input: PostInput) -> R<Value> {
             zernio_post(h, file, &input, id, &platform).await
         };
         if let Err(e) = result {
+            input.progress.report(&input.project, id, &platform, "failed", 0, total);
             failed = true;
             let existing = h.delivery(&input.project, id)?;
             if existing
@@ -569,9 +586,16 @@ async fn zernio_post(
     let url = up["uploadUrl"]
         .as_str()
         .ok_or("Upload URL tidak tersedia")?;
-    crate::cloud::upload(&h.client, url, file, "video/mp4")
+    let progress = input.progress.clone();
+    let project = input.project.clone();
+    let account = id.to_string();
+    let destination = platform.to_string();
+    crate::cloud::upload_with_progress(&h.client, url, file, "video/mp4", move |sent, total| {
+        progress.report(&project, &account, &destination, "uploading", sent, total);
+    })
         .await
         .map_err(|_| "Upload Zernio gagal")?;
+    input.progress.report(&input.project, id, platform, "processing", size, size);
     let mut body = json!({"content":input.caption,"mediaItems":[{"type":"video","url":up["publicUrl"]}],"platforms":[{"platform":platform,"accountId":id.trim_start_matches("z:")}]});
     if let Some(at) = &input.at {
         body["scheduledFor"] = json!(at);
@@ -589,6 +613,7 @@ async fn zernio_post(
             let pid = post["_id"]
                 .as_str()
                 .ok_or("Post ID Zernio belum diketahui")?;
+            input.progress.report(&input.project, id, platform, post["status"].as_str().unwrap_or("processing"), size, size);
             h.save_delivery(&input.project,id,&json!({"status":post["status"],"providerId":pid,"provider":"zernio","at":input.at}))
         }
         Err(e) => {
@@ -659,7 +684,7 @@ async fn youtube_upload(h: &Hybrid, file: &Path, input: &PostInput, id: &str) ->
         id,
         &json!({"status":"uploading","size":size,"sha256":hash,"at":input.at}),
     )?;
-    resume_youtube(h, file, &input.project, id).await
+    resume_youtube(h, file, &input.project, id, &input.progress).await
 }
 fn save_youtube_result(h: &Hybrid, project: &str, id: &str, out: &Value) -> R<()> {
     let old = h
@@ -683,7 +708,7 @@ async fn probe_youtube(h: &Hybrid, project: &str, size: u64) -> R<reqwest::Respo
         .await
         .map_err(|_| "Pemeriksaan upload gagal".into())
 }
-async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str) -> R<()> {
+async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str, progress: &Progress) -> R<()> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let old = h
         .delivery(project, id)?
@@ -707,6 +732,7 @@ async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str) -> R<(
     }
     let probe = probe_youtube(h, project, size).await?;
     if probe.status().is_success() {
+        progress.report(project, id, "youtube", "processing", size, size);
         let out = response(Ok(probe)).await?;
         return save_youtube_result(h, project, id, &out);
     }
@@ -730,6 +756,7 @@ async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str) -> R<(
     let mut f = tokio::fs::File::open(file)
         .await
         .map_err(|_| "Video tidak ditemukan")?;
+    progress.report(project, id, "youtube", "uploading", offset, size);
     while offset < size {
         f.seek(std::io::SeekFrom::Start(offset))
             .await
@@ -753,6 +780,7 @@ async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str) -> R<(
             .await
             .map_err(|_| "Upload terputus; ulangi untuk melanjutkan sesi yang sama")?;
         if r.status().is_success() {
+            progress.report(project, id, "youtube", "processing", size, size);
             let out = response(Ok(r)).await?;
             return save_youtube_result(h, project, id, &out);
         }
@@ -774,6 +802,7 @@ async fn resume_youtube(h: &Hybrid, file: &Path, project: &str, id: &str) -> R<(
             return Err("Offset upload YouTube tidak valid".into());
         }
         offset = next;
+        progress.report(project, id, "youtube", "uploading", offset, size);
     }
     Err("Upload belum terkonfirmasi; periksa status".into())
 }

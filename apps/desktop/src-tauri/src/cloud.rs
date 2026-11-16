@@ -118,19 +118,33 @@ pub fn is_https(u: &str) -> bool {
 
 /// PUTs a file to the signed upload URL PostForMe gave (no token: the URL is the permission).
 pub async fn upload(client: &reqwest::Client, upload_url: &str, file: &Path, content_type: &str) -> Result<(), CloudError> {
+    upload_with_progress(client, upload_url, file, content_type, |_, _| {}).await
+}
+
+
+pub async fn upload_with_progress(
+    client: &reqwest::Client, upload_url: &str, file: &Path, content_type: &str,
+    progress: impl Fn(u64, u64) + Send + Sync + 'static,
+) -> Result<(), CloudError> {
     if !is_https(upload_url) {
         return Err(CloudError::BadUrl);
     }
-    let bytes = tokio::fs::read(file).await.map_err(|_| CloudError::NotFound)?;
+    let input = tokio::fs::File::open(file).await.map_err(|_| CloudError::NotFound)?;
+    let total = input.metadata().await.map_err(|_| CloudError::NotFound)?.len();
+    let progress = std::sync::Arc::new(progress);
+    progress(0, total);
+    let stream = crate::upload_stream::file_upload_stream(input, total, progress.clone());
     let res = client
         .put(upload_url)
         .header(reqwest::header::CONTENT_TYPE, content_type)
+        .header(reqwest::header::CONTENT_LENGTH, total)
         .timeout(std::time::Duration::from_secs(600))
-        .body(bytes)
+        .body(reqwest::Body::wrap_stream(stream))
         .send()
         .await
         .map_err(|_| CloudError::Network)?;
     if res.status().is_success() {
+        progress(total, total);
         Ok(())
     } else {
         Err(CloudError::Provider)
@@ -215,4 +229,6 @@ mod tests {
         assert!(is_https("https://v3.fal.media/x.jpg"));
         assert!(!is_https("javascript:alert(1)"));
     }
+
+
 }

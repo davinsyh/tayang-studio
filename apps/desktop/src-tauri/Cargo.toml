@@ -9,6 +9,10 @@ name = "tayang_studio_lib"
 # Desktop executable links this Rust library directly; mobile embedding requires additional crate types.
 crate-type = ["rlib"]
 
+[[test]]
+name = "upload-stream"
+path = "tests/upload_stream.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -27,7 +31,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "s
 base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
 tauri-plugin-notification = "=2.8.0"
 tauri-plugin-autostart = "=2.7.0"
 tauri-plugin-single-instance = "=2.5.5"

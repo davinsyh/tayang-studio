@@ -21,6 +21,8 @@ pub mod telemetry;
 pub mod types;
 pub mod trace;
 pub mod usage;
+pub mod upload_progress;
+mod upload_stream;
 pub mod voice;
 
 use commands::AppState;
