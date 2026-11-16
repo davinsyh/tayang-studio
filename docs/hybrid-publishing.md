@@ -33,3 +33,11 @@ Use `pnpm install --frozen-lockfile` then `pnpm dev:desktop`. The development ap
 Tests cover per-account delivery persistence, scheduled YouTube privacy, credential-input clearing, and TikTok consent gating. Real provider uploads require your credentials and must be checked separately; mocked or local tests do not prove account eligibility, publishing permissions, quota or public visibility. External Google OAuth projects left in Testing may issue refresh tokens lasting seven days. Publishing requirements must be checked in the provider consoles for your project.
 
 References: https://docs.zernio.com/guides/media-uploads ; https://docs.zernio.com/posts/create-post ; https://docs.zernio.com/platforms/tiktok/posts ; https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol ; https://developers.google.com/identity/protocols/oauth2/native-app
+
+## Checks on this Windows checkout
+
+- Workspace TypeScript checks and frontend production build passed.
+- 77 focused frontend tests across the social, autopilot, Hybrid and translation-guard suites passed.
+- `cargo check -j 1` passed for the native application.
+- The two native Hybrid tests compiled, but their executable could not start with the installed Windows GNU toolchain (`STATUS_ENTRYPOINT_NOT_FOUND`; an alternate runtime path also produced `STATUS_INVALID_IMAGE_FORMAT`). Their assertions have **not** been observed passing. Run `cargo test -j 1 hybrid::tests --lib` in a working native toolchain before treating native runtime behavior as verified.
+- Visual review used a temporary mock preview of the new controls, not a live provider connection. No API key, Google client or video was sent to Zernio/YouTube during validation.
