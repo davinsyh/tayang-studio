@@ -30,6 +30,8 @@ export function useCloudError() {
 export function SocialAccounts() {
   const { t } = useTranslation();
   const hybrid = useHybrid(s => s.settings?.enabled ?? false);
+  const profileId = useHybrid(s => s.settings?.profileId);
+  const youtubeConnected = useHybrid(s => s.settings?.youtubeConnected);
   const cloudSignedIn = useAuth((s) => !!s.status?.signedIn);
   const signedIn = cloudSignedIn || hybrid;
   const navigate = useApp((s) => s.navigate);
@@ -52,7 +54,7 @@ export function SocialAccounts() {
     if (u.status === 'fulfilled') setUsage(u.value);
     if (a.status === 'fulfilled') setAccounts(a.value);
     else setError(cloudErrorCode(a.reason));
-  }, [hybrid]);
+  }, [hybrid, profileId, youtubeConnected]);
 
   useEffect(() => {
     if (signedIn) void load();

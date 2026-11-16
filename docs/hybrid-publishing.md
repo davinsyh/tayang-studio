@@ -18,6 +18,10 @@ TikTok requires per-video preview confirmation, consent and privacy selection. T
 
 ## Retry and status
 
+The Post dialog preselects all connected accounts. TikTok and Instagram receive the caption and hashtags; the separate title is used for YouTube. Titles and captions are filled from the project's `post.json` when available, with Write with AI available to prepare a draft. TikTok still requires a creator-supported privacy choice and per-video consent before Post now is enabled. Saving a different Zernio Profile ID refreshes the connected account list automatically; use the profile that actually contains the connected accounts.
+
+The dialog probes the latest render and reports whether its dimensions and duration meet YouTube's Shorts format rules (square or vertical, at most 180 seconds). Eligible renders get an Open Shorts player link for YouTube results. This selects a player URL; classification and public visibility remain YouTube decisions, and depend separately on processing and upload privacy.
+
 Delivery records are keyed by project and account. Successful destinations are skipped on retry, including when another destination failed. Reposting the same project/account as a new post is intentionally not supported. Scheduled deliveries already accepted by Zernio/YouTube do not need Tayang to stay open. Generating a video and handing it to the services still requires the desktop to run (tray mode is sufficient).
 
 YouTube uploads use 8 MiB resumable chunks. Repeat Post after a connection failure to probe and resume the existing session. The file hash must match the original render. If a session has expired or credentials are missing, inspect YouTube Studio rather than starting a duplicate. The app keeps ambiguous uploads for inspection. Refresh status probes completion and checks processing status.

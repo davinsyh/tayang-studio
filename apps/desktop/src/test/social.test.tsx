@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 import type { Project, SocialAccount, UsageResponse } from '@tayang/shared';
 
 vi.mock('@/lib/cloud', async (orig) => {
@@ -18,6 +19,7 @@ vi.mock('@/lib/cloud', async (orig) => {
 vi.mock('@/lib/ipc', () => ({
   listProjects: vi.fn().mockResolvedValue([]),
   videoThumbnail: vi.fn().mockResolvedValue(null),
+  mediaProbe: vi.fn().mockResolvedValue(null),
   assetUrl: (p: string) => p,
   readProjectFile: vi.fn().mockRejectedValue('no file'),
 }));
@@ -36,7 +38,9 @@ import { SocialAccounts } from '@/components/SocialAccounts';
 import { PostDialog } from '@/components/PostDialog';
 import { Social } from '@/screens/Social';
 import { UsageTab } from '@/components/UsageTab';
-import { listProjects, readProjectFile } from '@/lib/ipc';
+import { listProjects, mediaProbe, readProjectFile } from '@/lib/ipc';
+import { invoke } from '@tauri-apps/api/core';
+import { useHybrid } from '@/lib/hybrid';
 import { useApp } from '@/state/app';
 import { useAuth } from '@/state/auth';
 
@@ -76,6 +80,8 @@ const project: Project = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useHybrid.setState({ settings: null, refresh: vi.fn(async () => {}) });
+  vi.mocked(mediaProbe).mockResolvedValue(null);
   useAuth.setState({ status: { state: 'signed-in', signedIn: true, apiUrl: 'x', account: { id: 'a', email: 'e', name: 'n', plan: 'creator' } } as never });
   useApp.setState({ route: { name: 'settings' }, leaveGuard: null });
 });
@@ -148,6 +154,38 @@ describe('PostDialog', () => {
   // No post.json unless a test writes one.
   beforeEach(() => {
     vi.mocked(readProjectFile).mockRejectedValue('no file');
+  });
+
+  it('selects all three Hybrid platforms and sends the caption separately from the YouTube title', async () => {
+    useHybrid.setState({ settings: { enabled: true, profileId: 'default', clientId: 'desktop', hasZernioKey: true, youtubeConnected: true } });
+    vi.mocked(invoke).mockResolvedValue({ privacyLevels: [{ value: 'SELF_ONLY', label: 'Self only' }], postingLimits: { interactionSettings: {} } });
+    vi.mocked(mediaProbe).mockResolvedValue({ width: 1080, height: 1920, durationSec: 80, fps: 30, frames: 2400 });
+    vi.mocked(readProjectFile).mockResolvedValue(draft({ title: 'YouTube headline', description: 'Caption only', hashtags: ['fakta'] }));
+    vi.mocked(cloud.socialAccounts).mockResolvedValue([acct('yt:own', 'youtube', 'ytcreator'), acct('z:ig', 'instagram', 'igcreator'), acct('z:tt', 'tiktok', 'ttcreator')]);
+    vi.mocked(cloud.socialPost).mockResolvedValue({ postId: 'hybrid:p1', status: 'published', postsCharged: 0, usage: { allowance: 0, used: 0, remaining: 0 } });
+    vi.mocked(cloud.socialPostStatus).mockResolvedValue({ postId: 'hybrid:p1', status: 'published', scheduledAt: null, results: [{ socialAccountId: 'yt:own', success: true, error: null, url: 'https://www.youtube.com/watch?v=EKZKpjfLc5o' }] });
+    open();
+    expect(await screen.findByDisplayValue('YouTube headline')).toBeInTheDocument();
+    expect(screen.getByLabelText('Caption & hashtags')).toHaveValue('Caption only\n\n#fakta');
+    for (const name of ['ytcreator', 'igcreator', 'ttcreator']) expect(screen.getByRole('checkbox', { name: new RegExp(name) })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Post now' })).toBeDisabled();
+    await screen.findByRole('option', { name: 'Self only' });
+    await userEvent.selectOptions(screen.getByLabelText('Privacy'), 'SELF_ONLY');
+    await userEvent.click(screen.getByLabelText(/I reviewed this video/));
+    await userEvent.click(screen.getByRole('button', { name: 'Post now' }));
+    expect(cloud.socialPost).toHaveBeenCalledWith(expect.objectContaining({ title: 'YouTube headline', caption: 'Caption only\n\n#fakta', accountIds: ['yt:own', 'z:ig', 'z:tt'], tiktokSettings: expect.objectContaining({ express_consent_given: true }) }));
+    expect(await screen.findByRole('link', { name: 'Open Shorts player' })).toHaveAttribute('href', 'https://www.youtube.com/shorts/EKZKpjfLc5o');
+  });
+
+  it('hides the YouTube title when posting only to Instagram', async () => {
+    useHybrid.setState({ settings: { enabled: true, profileId: 'default', clientId: 'desktop', hasZernioKey: true, youtubeConnected: true } });
+    vi.mocked(cloud.socialAccounts).mockResolvedValue([acct('z:ig', 'instagram', 'igcreator')]);
+    vi.mocked(cloud.socialPost).mockResolvedValue({ postId: 'hybrid:p1', status: 'published', postsCharged: 0, usage: { allowance: 0, used: 0, remaining: 0 } });
+    open();
+    await screen.findByText('@igcreator');
+    expect(screen.queryByLabelText(/YouTube title/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Post now' }));
+    expect(cloud.socialPost).toHaveBeenCalledWith(expect.objectContaining({ title: null, accountIds: ['z:ig'] }));
   });
 
   it("fills the title, description and time from the agent's post.json, and posts the title", async () => {

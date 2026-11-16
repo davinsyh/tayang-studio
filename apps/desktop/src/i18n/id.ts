@@ -712,6 +712,13 @@ export const id: Translations = {
   },
   post: {
     titleField: 'Judul',
+    youtubeTitle: 'Judul YouTube',
+    captionHashtags: 'Caption & hashtag',
+    multiPlatformHint: 'Semua akun terhubung sudah dipilih. Sekali posting mengirim video ke setiap akun yang dipilih.',
+    captionRouting: 'TikTok dan Instagram hanya menerima caption ini. YouTube menerima judul di atas dan teks ini sebagai deskripsi.',
+    shortsEligible: '{{width}}×{{height}} · {{seconds}}d: memenuhi syarat format Shorts. YouTube menentukan klasifikasinya setelah pemrosesan.',
+    shortsIneligible: '{{width}}×{{height}} · {{seconds}}d: Shorts memerlukan video persegi atau vertikal dengan durasi hingga 180 detik.',
+    openShorts: 'Buka pemutar Shorts',
     writeWithAi: 'Tulis dengan AI',
     agentWriting: 'Agen sedang menulis judul, deskripsi, dan jadwal…',
     fromAgent: 'Ditulis oleh agen: cek dulu sebelum posting.',

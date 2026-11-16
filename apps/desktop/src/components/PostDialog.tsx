@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, Sparkles } from 'lucide-react';
-import type { CreatePostResponse, PostDetails, Project, SocialAccount } from '@tayang/shared';
+import type { CreatePostResponse, MediaInfo, PostDetails, Project, SocialAccount } from '@tayang/shared';
 import { Button } from '@/components/Button';
 import { Spinner } from '@/components/Loading';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -12,7 +12,8 @@ import { useCloudError } from '@/components/SocialAccounts';
 import { PlatformLogo } from '@/components/PlatformLogo';
 import { defaultSlot, localToIso } from '@/components/ScheduleDialog';
 import { cloudErrorCode, platformName, socialAccounts, socialPost, socialPostStatus, type CloudErrorCode } from '@/lib/cloud';
-import { listProjects } from '@/lib/ipc';
+import { listProjects, mediaProbe } from '@/lib/ipc';
+import { isShortsFormat, shortsPlayerUrl } from '@/lib/shorts';
 import { captionOf, readPostDraft, TITLE_MAX, type PostDraft } from '@/lib/postDraft';
 import { useApp } from '@/state/app';
 import { track } from '@/lib/analytics';
@@ -53,6 +54,7 @@ export function PostDialog({
   const [youtubePrivacy, setYoutubePrivacy] = useState('private');
   const [kids, setKids] = useState(false);
   const [hybridError, setHybridError] = useState('');
+  const [media, setMedia] = useState<MediaInfo | null>(null);
   useEffect(() => { if(open) void useHybrid.getState().refresh(); }, [open]);
   const explain = useCloudError();
   const navigate = useApp((s) => s.navigate);
@@ -76,6 +78,7 @@ export function PostDialog({
     setError(null);
     setHybridError('');
     setTiktokSettings(undefined);
+    setMedia(null);
     setDetails(null);
     setTitle(project.title);
     setCaption(project.title);
@@ -88,6 +91,7 @@ export function PostDialog({
     setRequestId(crypto.randomUUID());
     setPhase({ kind: 'form' });
     let alive = true;
+    void mediaProbe(project.id).then((info) => alive && setMedia(info)).catch(() => {});
     socialAccounts()
       .then((list) => {
         if (!alive) return;
@@ -152,6 +156,8 @@ export function PostDialog({
   const writing = asked && agentBusy;
 
   const at = later ? localToIso(date, time) : null;
+  const youtubeSelected = accounts?.some(a => a.platform === 'youtube' && picked.has(a.id)) ?? false;
+  const shortsFormat = isShortsFormat(media);
   const tiktokAccount = accounts?.find(a => a.id.startsWith('z:') && a.platform === 'tiktok' && picked.has(a.id));
   const canPost = (!tiktokAccount || !!tiktokSettings) && phase.kind === 'form' && picked.size > 0 && caption.trim().length > 0 && (!later || !!at);
 
@@ -160,7 +166,7 @@ export function PostDialog({
     setHybridError('');
     setPhase({ kind: 'posting' });
     try {
-      const result = await socialPost({ projectId: project.id, title: title.trim() || null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId, ...(hybrid ? {tiktokSettings,youtubePrivacy,youtubeMadeForKids:kids} : {}) });
+      const result = await socialPost({ projectId: project.id, title: (!hybrid || youtubeSelected) ? title.trim() || null : null, caption: caption.trim(), accountIds: [...picked], scheduledAt: at, clientRequestId: requestId, ...(hybrid ? {tiktokSettings,youtubePrivacy,youtubeMadeForKids:kids} : {}) });
       setPhase({ kind: 'done', result });
       track('video posted', {
         accounts: picked.size,
@@ -244,6 +250,7 @@ export function PostDialog({
                 </label>
               ))}
             </fieldset>
+            {hybrid && <p className="m-0 text-xs text-text-3">{t('post.multiPlatformHint')}</p>}
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <span className="mr-auto text-xs text-text-3">
@@ -263,17 +270,18 @@ export function PostDialog({
                   </Button>
                 )}
               </div>
-              <label className="flex flex-col gap-1.5 text-[13px] text-text-2">
+              {(!hybrid || youtubeSelected) && <label className="flex flex-col gap-1.5 text-[13px] text-text-2">
                 <span className="flex justify-between">
-                  {t('post.titleField')}
+                  {hybrid ? t('post.youtubeTitle') : t('post.titleField')}
                   <span className="text-xs text-text-3 tabular-nums">{title.length}/{TITLE_MAX}</span>
                 </span>
                 <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={TITLE_MAX} disabled={writing} />
-              </label>
+              </label>}
               <label className="flex flex-col gap-1.5 text-[13px] text-text-2">
-                {t('post.caption')}
+                {hybrid ? t('post.captionHashtags') : t('post.caption')}
                 <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={2200} rows={4} disabled={writing} />
               </label>
+              {hybrid && <p className="m-0 text-xs text-text-3">{t('post.captionRouting')}</p>}
             </div>
             <div className="flex flex-col gap-2">
               <label className="flex cursor-pointer items-center gap-3 text-[13px]">
@@ -289,6 +297,7 @@ export function PostDialog({
             </div>
             {tiktokAccount && <TikTokOptions key={tiktokAccount.id} accountId={tiktokAccount.id} contentKey={`${title}\n${caption}`} onChange={setTiktokSettings}/> }
             {hybrid && picked.has('yt:own') && <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm"><legend>YouTube</legend>
+              {media && <p className="m-0 text-xs text-text-2">{t(shortsFormat ? 'post.shortsEligible' : 'post.shortsIneligible', { width: media.width, height: media.height, seconds: Math.round(media.durationSec) })}</p>}
               <label className="flex flex-col gap-1">{t('hybrid.youtubePrivacy')}<select className="rounded border border-border bg-card p-2" value={youtubePrivacy} onChange={e=>setYoutubePrivacy(e.target.value)}><option value="private">{t('hybrid.private')}</option><option value="unlisted">{t('hybrid.unlisted')}</option><option value="public">{t('hybrid.public')}</option></select></label>
               {later && <p className="m-0 text-xs text-text-2">{t('hybrid.scheduleHint')}</p>}
               <label className="flex items-center gap-2"><input type="checkbox" checked={kids} onChange={e=>setKids(e.target.checked)}/>{t('hybrid.kids')}</label>
@@ -304,8 +313,8 @@ export function PostDialog({
                 <span className="min-w-0 flex-1 truncate">{accountName(r.socialAccountId)}</span>
                 {r.success ? (
                   r.url ? (
-                    <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-orange-light">
-                      {t('post.open')}
+                    <a href={shortsFormat && r.socialAccountId === 'yt:own' ? shortsPlayerUrl(r.url) ?? r.url : r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-orange-light">
+                      {t(shortsFormat && r.socialAccountId === 'yt:own' && shortsPlayerUrl(r.url) ? 'post.openShorts' : 'post.open')}
                       <ExternalLink size={12} aria-hidden="true" />
                     </a>
                   ) : (

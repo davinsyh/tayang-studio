@@ -718,6 +718,13 @@ export const en = {
   },
   post: {
     titleField: 'Title',
+    youtubeTitle: 'YouTube title',
+    captionHashtags: 'Caption & hashtags',
+    multiPlatformHint: 'All connected accounts are selected. Post once to send the video to every selected account.',
+    captionRouting: 'TikTok and Instagram receive this caption only. YouTube receives the title above and this text as its description.',
+    shortsEligible: '{{width}}×{{height}} · {{seconds}}s: meets the Shorts format requirements. YouTube determines classification after processing.',
+    shortsIneligible: '{{width}}×{{height}} · {{seconds}}s: Shorts requires a square or vertical video up to 180 seconds.',
+    openShorts: 'Open Shorts player',
     writeWithAi: 'Write with AI',
     agentWriting: 'Your agent is writing the title, description and time…',
     fromAgent: 'Written by your agent: check it before posting.',
