@@ -11,10 +11,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent-plugin')
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 function frontmatter(text: string): Record<string, string> {
-  const m = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
   if (!m) throw new Error('no frontmatter');
   return Object.fromEntries(
-    m[1]!.split('\n').map((l) => {
+    m[1]!.split(/\r?\n/).map((l) => {
       const i = l.indexOf(':');
       return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
     }),

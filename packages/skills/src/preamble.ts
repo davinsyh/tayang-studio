@@ -1,7 +1,7 @@
 import type { UiLanguage } from '@tayang/shared';
 import tayangStudio from '../agent-plugin/skills/tayang-studio/SKILL.md?raw';
 
-const stripFrontmatter = (text: string): string => text.replace(/^---\n[\s\S]*?\n---\n+/, '').trim();
+const stripFrontmatter = (text: string): string => text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)+/, '').trim();
 
 /** One line telling the agent which language the user reads; empty for English, the default. */
 export function languageHint(language?: UiLanguage | null): string {
@@ -77,7 +77,7 @@ export function userSkillsText(skills: readonly UserSkill[]): string {
 export const BUILTIN_SKILLS: readonly { id: string; description: string; body: string }[] = [
   {
     id: 'tayang-studio',
-    description: /^---\n[\s\S]*?^description:\s*(.*)$/m.exec(tayangStudio)?.[1]?.trim() ?? '',
+    description: /^---\r?\n[\s\S]*?^description:\s*(.*)$/m.exec(tayangStudio)?.[1]?.trim() ?? '',
     body: stripFrontmatter(tayangStudio),
   },
 ];

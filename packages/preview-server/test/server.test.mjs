@@ -39,12 +39,12 @@ test('confined serves files inside the root only', () => {
   const outside = tmp();
   write(root, 'a/b.txt', 'x');
   write(outside, 'secret.txt', 's');
-  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'link.txt'));
+  fs.symlinkSync(outside, path.join(root, 'linkdir'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.equal(confined(root, 'a/b.txt'), path.join(root, 'a', 'b.txt'));
   assert.equal(confined(root, 'a%2Fb.txt'), path.join(root, 'a', 'b.txt'));
   assert.equal(confined(root, '../' + path.basename(outside) + '/secret.txt'), null);
   assert.equal(confined(root, '%2e%2e/x'), null);
-  assert.equal(confined(root, 'link.txt'), null);
+  assert.equal(confined(root, 'linkdir/secret.txt'), null);
   assert.equal(confined(root, 'a'), null);
   assert.equal(confined(root, 'missing.txt'), null);
   assert.equal(confined(root, 'bad%zz'), null);

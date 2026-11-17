@@ -12,8 +12,9 @@ const TEMPLATE = path.join(HERE, '..', 'harness', 'hyperframes.html');
 
 /** npx next to the Node running this server: the user's own, found the way their terminal finds it. */
 export function npxPath(nodePath = process.execPath, platform = process.platform) {
-  const dir = path.dirname(nodePath);
-  return platform === 'win32' ? path.join(dir, 'npx.cmd') : path.join(dir, 'npx');
+  const paths = platform === 'win32' ? path.win32 : path.posix;
+  const dir = paths.dirname(nodePath);
+  return paths.join(dir, platform === 'win32' ? 'npx.cmd' : 'npx');
 }
 
 function run(cmd, args, cwd, timeoutMs) {

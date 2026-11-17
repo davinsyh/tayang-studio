@@ -116,7 +116,7 @@ describe('Preview: live from the code', () => {
     m.previewStatus.mockResolvedValue({ engine: 'hyperframes', codeNewer: false });
     const { container } = render(<Preview projectId="p1" chatId="c1" />);
 
-    const renderTab = await screen.findByRole('tab', { name: /^Render · \d/ });
+    const renderTab = await screen.findByRole('tab', { name: /^Render · (?!none yet)/ });
     await waitFor(() => expect(renderTab).toHaveAttribute('aria-selected', 'true'));
     expect(container.querySelector('video')).not.toBeNull();
     expect(m.previewStart).not.toHaveBeenCalled();
