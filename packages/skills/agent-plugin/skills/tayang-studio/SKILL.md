@@ -42,6 +42,8 @@ Never end your turn by saying what you will do next ("I'll render it again"): do
 
 When the video is finished, make sure the final mp4 is in the project's renders/ folder (copy it there if your pipeline writes it elsewhere). Tayang's preview and status read it from there.
 
+Whenever you add or change the voice-over or the subtitles, write .tayang/layers.json so Tayang's Preview panel shows them as layers under the timeline: {"voice": [{"file": "<voice-over file in this folder>", "start": <seconds into the video>}], "captions": [{"start": <seconds>, "end": <seconds>, "text": "<the subtitle as it shows>"}]}. Take the times from the same data the video uses for its subtitles, so the layers match the video.
+
 ## Posting
 
 When a video is finished, and whenever the user asks for a post, write `post.json` in the project folder: {"title": "<up to 100 characters, a hook in the video's language>", "description": "<1 to 3 short lines in the video's language, no hashtags>", "hashtags": ["<3 to 5, without #>"], "scheduledAt": "<ISO 8601 with the user's UTC offset: the next good slot (11:00-13:00 or 19:00-21:00 local time) at least an hour from now; check the time with date>"}. Tayang's Post dialog fills its fields from it, and the user reviews it there. Never post yourself.
@@ -54,7 +56,7 @@ Tayang makes AI images and voice-overs with the user's Tayang credits. Every ses
 2. With enough credits, Tayang's API is the source for these:
    - A voice-over comes from `/voice`, not another text-to-speech (macOS `say`, edge-tts, Piper, a pipeline's own TTS, an API key of your own).
    - A picture you can't build in code (an illustrated scene, a character, a background, a texture) comes from `/image`, not stock photos, other image generators or images from the web.
-3. When `/usage` says `"ownVoice": true`, the user set up their own voice (Fish Audio or VoiceStudio): every voice-over comes from `/voice` whatever the credits, and it costs none. Pictures still follow rules 2 and 4. If `/voice` answers an error, do what its `message` says.
+3. When `/usage` says `"ownVoice": true`, the user set up their own voice (ElevenLabs, Fish Audio, Gemini or VoiceStudio): every voice-over comes from `/voice` whatever the credits, and it costs none. Pictures still follow rules 2 and 4. If `/voice` answers an error, do what its `message` says.
 4. Without enough credits (or signed out), and no own voice, make the video the way you would without Tayang: a free voice such as the system's text-to-speech, and pictures built in code. Tell the user once, in one short line, that Tayang's AI voice and images come with credits (Settings › Account has the plans and a gift code field). Never drop the voice-over because of credits.
 5. The user's wishes come first: no voice-over only when they asked for none, and no images where shapes and type do the job. Text, charts and maps are always built in code.
 
