@@ -1,4 +1,4 @@
-"""Import eight published MG Styles 15 looks into the local Tayang library.
+"""Import the 15 published MG Styles 15 looks into the local Tayang library.
 
 The visual definitions come from Opus Motion Library's MIT-licensed styles.json;
 the original prompts, poster frames and demo films come from MG Styles 15 (MIT).
@@ -27,13 +27,20 @@ MG_RAW = f"https://raw.githubusercontent.com/Vincentwei1021/mg-styles-15/{MG_COM
 MG_PAGE = f"https://github.com/Vincentwei1021/mg-styles-15/blob/{MG_COMMIT}"
 PAIRS = {
     "flat-vector-pop": "01-flat-vector",
+    "gold-line-luxe": "02-line-art",
+    "iso-diorama": "03-isometric",
+    "soft-3d-candy": "04-3d-render",
     "cel-boil": "05-cel-boil",
+    "collage-cutout": "06-collage",
     "liquid-candy": "07-liquid",
     "shape-morph": "08-morph",
+    "bauhaus-kinetic": "09-bauhaus",
     "synthwave-vhs": "10-synthwave",
     "aurora-glass": "12-aurora-glass",
     "variety-hanazi": "18-hanazi",
     "sticker-explainer": "19-paperclip",
+    "pixel-quest": "20-pixel",
+    "cyber-hud-fui": "22-hud",
 }
 DATA = Path.home() / "AppData/Roaming/app.tayang.studio"
 DB = DATA / "tayang.db"
@@ -60,7 +67,7 @@ def main() -> None:
         existing = {row[0] for row in db.execute("SELECT id FROM styles WHERE id LIKE 'mg15-%'")}
     pending = {style_id: demo for style_id, demo in PAIRS.items() if f"mg15-{style_id}" not in existing}
     if not pending:
-        print("All eight MG15 styles are already installed")
+        print("All 15 MG15 styles are already installed")
         subprocess.run([sys.executable, str(Path(__file__).with_name("install-mg15-starters.py"))], check=True)
         return
 
@@ -137,6 +144,8 @@ def main() -> None:
             technique,
             "Adapt the source's browser-based method to Tayang's HyperFrames project. Keep the project's required output path and render settings.",
         ])
+        if style_id == "soft-3d-candy":
+            build += "\nThe source provides Blender scripts and meshes but omits rendered frame plates. Install Blender 5.1 and generate out/frames before rendering; see demos/04-3d-render/README.md in the starter."
         prepared.append((
             local_id, f"[MG15] {item['name']}", "mine", prompt_url,
             json.dumps(notes, ensure_ascii=False), style_prompt,

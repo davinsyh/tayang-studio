@@ -25,21 +25,38 @@ MG_PAGE = f"https://github.com/Vincentwei1021/mg-styles-15/blob/{MG_COMMIT}"
 TREE_URL = f"https://api.github.com/repos/Vincentwei1021/mg-styles-15/git/trees/{MG_COMMIT}?recursive=1"
 PAIRS = {
     "flat-vector-pop": "01-flat-vector",
+    "gold-line-luxe": "02-line-art",
+    "iso-diorama": "03-isometric",
+    "soft-3d-candy": "04-3d-render",
     "cel-boil": "05-cel-boil",
+    "collage-cutout": "06-collage",
     "liquid-candy": "07-liquid",
     "shape-morph": "08-morph",
+    "bauhaus-kinetic": "09-bauhaus",
     "synthwave-vhs": "10-synthwave",
     "aurora-glass": "12-aurora-glass",
     "variety-hanazi": "18-hanazi",
     "sticker-explainer": "19-paperclip",
+    "pixel-quest": "20-pixel",
+    "cyber-hud-fui": "22-hud",
 }
 EXTRA = {
+    "gold-line-luxe": ["demos/02-line-art/out/timing.json"],
+    "soft-3d-candy": ["demos/04-3d-render/out/events.json"],
+    "collage-cutout": [
+        "assets/textures/grain/grain_film35_2048.png",
+        "assets/textures/dust/dust_01_3840x2160.png",
+        "assets/textures/dust/dust_03_3840x2160.png",
+        "assets/textures/washi/washi_solid_14.png",
+        "assets/textures/washi/washi_solid_12.png",
+    ],
     "shape-morph": ["assets/textures/paper/Paper001_4K_color.jpg"],
     "aurora-glass": ["assets/textures/grain/grain_fine_2048.png", "demos/12-aurora-glass/out/env.json"],
     "variety-hanazi": ["assets/textures/grain/grain_fine_2048.png"],
 }
 FONTS = {
     "cel-boil": ("lxgwmarkergothic", "LXGWMarkerGothic-Regular.ttf", "assets/fonts/cjk/lxgwmarkergothic/LXGWMarkerGothic-Regular.ttf"),
+    "iso-diorama": ("unbounded", "Unbounded[wght].ttf", "demos/03-isometric/assets/fonts/Unbounded-800-static.ttf"),
     "liquid-candy": ("fraunces", "Fraunces[SOFT,WONK,opsz,wght].ttf", "demos/07-liquid/assets/Fraunces-Liquid-72-900-Soft.ttf"),
     "shape-morph": ("outfit", "Outfit[wght].ttf", "demos/08-morph/assets/fonts/Outfit-SemiBold.ttf"),
     "synthwave-vhs": ("mrdafoe", "MrDafoe-Regular.ttf", "demos/10-synthwave/assets/fonts/MrDafoe-Regular.ttf"),
@@ -115,6 +132,8 @@ The upstream project does not distribute its font binaries. This starter bundles
 
 Generate the video's narration through Tayang /voice using the selected voice source. The sample renderer is silent until the project integrates its own audio; update tayang.json or mux the narration into the final MP4. Keep a final render in renders/ and follow AGENTS.md for the project's actual topic and length.
 """
+    if style_id == "soft-3d-candy":
+        guide += "\nThis demo has an extra Blender dependency. The publisher provides mesh files and Blender scripts, but does not publish its rendered `out/frames/*.png` plates. Before running the browser renderer, generate those plates with Blender 5.1 as described in `demos/04-3d-render/README.md`. The bundled demo video is a visual reference, not an editable replacement for those frames.\n"
     manifest = {
         "engine": "mg-styles-15-browser",
         "install": ["npm", "install", "--ignore-scripts"],
@@ -142,12 +161,12 @@ def main() -> None:
     with sqlite3.connect(DB) as db:
         rows = {row[0]: row[1] for row in db.execute("SELECT id,template FROM styles WHERE id LIKE 'mg15-%'")}
     pending = {style_id: demo for style_id, demo in PAIRS.items()
-        if not rows.get(f"mg15-{style_id}") or json.loads(rows[f"mg15-{style_id}"])["version"] < (6 if style_id == "aurora-glass" else 5)}
+        if not rows.get(f"mg15-{style_id}") or json.loads(rows[f"mg15-{style_id}"])["version"] < (6 if style_id in {"aurora-glass", "iso-diorama", "collage-cutout"} else 5)}
     if not pending:
-        print("All eight MG15 styles already have Windows-ready starter templates")
+        print("All 15 MG15 styles already have starter templates")
         return
     if len(rows) != len(PAIRS):
-        raise RuntimeError("The eight MG15 styles must be imported first")
+        raise RuntimeError("The 15 MG15 styles must be imported first")
 
     response = requests.get(TREE_URL, timeout=30)
     response.raise_for_status()
@@ -184,7 +203,7 @@ def main() -> None:
         part = TEMPLATES / f"{digest}.part"
         part.write_bytes(archive)
         os.replace(part, target)
-        meta = json.dumps({"sha256": digest, "size": len(archive), "version": 6 if style_id == "aurora-glass" else 5})
+        meta = json.dumps({"sha256": digest, "size": len(archive), "version": 6 if style_id in {"aurora-glass", "iso-diorama", "collage-cutout"} else 5})
         prepared.append((meta, f"mg15-{style_id}"))
         print(f"Prepared {style_id}: {len(files)} upstream files, {len(archive) / 1048576:.1f} MB", flush=True)
 
@@ -196,7 +215,7 @@ def main() -> None:
         db.executemany("UPDATE styles SET template=? WHERE id=?", prepared)
         count = db.execute("SELECT count(*) FROM styles WHERE id LIKE 'mg15-%' AND template IS NOT NULL").fetchone()[0]
         if count != len(PAIRS):
-            raise RuntimeError(f"Expected eight starter templates, found {count}")
+            raise RuntimeError(f"Expected 15 starter templates, found {count}")
     print(f"Attached {len(prepared)} starter templates; database backup: {backup}")
 
 
