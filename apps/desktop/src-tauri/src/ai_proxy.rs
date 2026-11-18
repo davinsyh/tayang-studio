@@ -4,7 +4,7 @@
 //! own folder, and the user's sign-in token never leaves Tayang.
 //!
 //!   POST $TAYANG_AI_URL/image  { "prompt", "aspect"?, "count"?, "out"? }
-//!   POST $TAYANG_AI_URL/voice  { "text", "language"?, "voice"?, "out"? }
+//!   POST $TAYANG_AI_URL/voice  { "text", "language"?, "voice"?, "model"?, "instruct"?, "out"? }
 //!
 //! The answer is `{ "files": [...], "creditsCharged", "creditsLeft" }` with paths relative to the
 //! agent's folder, or `{ "error": "<code>", "message" }`.
@@ -26,7 +26,7 @@ const VOICE_MAX_BYTES: u64 = 60 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq)]
 pub enum AiJob {
     Image { prompt: String, aspect: Option<String>, count: u32, out: PathBuf },
-    Voice { text: String, language: Option<String>, voice: Option<String>, out: PathBuf },
+    Voice { text: String, language: Option<String>, voice: Option<String>, model: Option<String>, instruct: Option<String>, out: PathBuf },
     /// `GET /usage`: the credits and auto-posts left, so the agent knows before it plans.
     Usage,
 }
@@ -285,7 +285,18 @@ pub fn parse_job(path: &str, b: &Value) -> Result<AiJob, String> {
         }
         "/voice" => {
             let t = text("text").filter(|t| !t.trim().is_empty()).ok_or("text is required")?;
-            Ok(AiJob::Voice { text: t, language: text("language"), voice: text("voice"), out: out_path(b.get("out"), "voice", &["mp3"])? })
+            let instruct = text("instruct").filter(|s| !s.trim().is_empty());
+            if instruct.as_ref().is_some_and(|s| s.chars().count() > 4096) {
+                return Err("instruct must be at most 4096 characters".into());
+            }
+            Ok(AiJob::Voice {
+                text: t,
+                language: text("language"),
+                voice: text("voice"),
+                model: text("model").filter(|s| !s.trim().is_empty()),
+                instruct,
+                out: out_path(b.get("out"), "voice", &["mp3"])?,
+            })
         }
         _ => Err("Use /image or /voice".into()),
     }
@@ -362,7 +373,7 @@ pub async fn run_job(client: &reqwest::Client, base: &str, token: &str, job: AiJ
             }
             ("/v1/ai/image", b, (0..*count as usize).map(|i| nth_path(out, i)).collect(), IMAGE_MAX_BYTES)
         }
-        AiJob::Voice { text, language, voice, out } => {
+        AiJob::Voice { text, language, voice, out, .. } => {
             let mut b = json!({ "text": text, "clientRequestId": request_id });
             if let Some(l) = language {
                 b["language"] = json!(l);
@@ -418,6 +429,10 @@ mod tests {
             _ => panic!(),
         }
         assert!(parse_job("/voice", &json!({ "text": "x", "out": "a.wav" })).is_err());
+        let v = parse_job("/voice", &json!({ "text": "halo", "voice": "SANTI-Cheerful-Ad", "model": "voxcpm2", "instruct": "speak warmly" })).unwrap();
+        assert!(matches!(v, AiJob::Voice { voice: Some(ref voice), model: Some(ref model), instruct: Some(ref instruct), .. }
+            if voice == "SANTI-Cheerful-Ad" && model == "voxcpm2" && instruct == "speak warmly"));
+        assert!(parse_job("/voice", &json!({ "text": "halo", "instruct": "a".repeat(4097) })).is_err());
         assert_eq!(parse_action("/autopilot", &json!({ "name": "Kopi" })).unwrap().unwrap().0, "create_autopilot");
         assert!(parse_action("/autopilot", &json!({})).unwrap().is_err());
         let (name, ctx) = parse_action("/autopilot-chat", &json!({ "notes": " sejarah dunia, Instagram " })).unwrap().unwrap();

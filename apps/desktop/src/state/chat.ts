@@ -1,6 +1,6 @@
 import { notifyAgent } from '@/lib/agentNotify';
 import { create } from 'zustand';
-import { FOREGROUND_RULE, RENDERS_RULE, buildSessionPreamble, languageHint, sessionFacts, stripFramesToken, userSkillsText } from '@tayang/skills';
+import { FOREGROUND_RULE, RENDERS_RULE, VOICESTUDIO_RULE, buildSessionPreamble, languageHint, sessionFacts, stripFramesToken, userSkillsText } from '@tayang/skills';
 import type { AgentId, AgentQuestion, AgentUpdate, Chat, ChatMessage, Style, FileInfo, JobStatus, MessagePart, PermissionRequest, QuestionResponse } from '@tayang/shared';
 import {
   addMessage,
@@ -774,6 +774,9 @@ export const useChat = create<ChatState>((set, get) => {
         }
         const sent = opts?.promptParts ? [...attached, ...opts.promptParts] : visible;
         const lead: MessagePart[] = [];
+        if (useApp.getState().settings?.voiceSource === 'voicestudio' && !isInternalChat(chatId)) {
+          lead.push({ type: 'text', text: VOICESTUDIO_RULE });
+        }
         // Claude loads the Tayang plugin itself (unless the app shipped without it); other agents get
         // the skills as text, once per session.
         const uiLang = uiLanguage();

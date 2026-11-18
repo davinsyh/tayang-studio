@@ -836,6 +836,16 @@ describe('ChatProject', () => {
     expect(screen.queryByText('Skip the frame check this time.')).not.toBeInTheDocument();
   });
 
+  it('passes VoiceStudio documentation and clone guidance to an existing chat', async () => {
+    useApp.setState({ settings: { ...settings, voiceSource: 'voicestudio' } });
+    const user = userEvent.setup();
+    render(<ChatProject chatId="c1" />);
+    await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'Buat suara');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    expect(JSON.stringify(vi.mocked(ipc.agentPrompt).mock.calls[0]![1])).toContain('docs/expressive-speech.md');
+  });
+
   it('shows Stop while the agent works and cancels the turn', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.agentCancel).mockResolvedValue();

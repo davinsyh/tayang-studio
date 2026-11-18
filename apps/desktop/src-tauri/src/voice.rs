@@ -311,13 +311,21 @@ pub async fn gemini_check(client: &reqwest::Client, base: &str, key: &str) -> Vo
 }
 
 /// Speech from VoiceStudio on this computer: its OpenAI-style `/v1/audio/speech`.
-pub async fn voicestudio_speak(client: &reqwest::Client, base: &str, text: &str, language: Option<&str>, voice: Option<&str>) -> Result<Vec<u8>, VoiceError> {
+pub async fn voicestudio_speak(client: &reqwest::Client, base: &str, text: &str, language: Option<&str>, voice: Option<&str>, model: Option<&str>, instruct: Option<&str>) -> Result<Vec<u8>, VoiceError> {
     if text.chars().count() > VOICESTUDIO_MAX_CHARS {
         return Err(VoiceError::TooLong);
     }
-    let mut body = json!({ "model": "tts-1", "voice": voice.filter(|v| !v.trim().is_empty()).unwrap_or("default"), "input": text, "response_format": "mp3" });
+    let mut body = json!({
+        "model": model.filter(|m| !m.trim().is_empty()).unwrap_or("tts-1"),
+        "voice": voice.filter(|v| !v.trim().is_empty()).unwrap_or("default"),
+        "input": text,
+        "response_format": "mp3"
+    });
     if let Some(l) = language.filter(|l| !l.is_empty()) {
         body["language"] = json!(l);
+    }
+    if let Some(i) = instruct.filter(|i| !i.trim().is_empty()) {
+        body["instruct"] = json!(i);
     }
     let res = client
         .post(format!("{base}/v1/audio/speech"))
@@ -346,13 +354,13 @@ pub struct VoiceSetup {
 
 /// Runs a `/voice` job with the user's own voice and saves it at `out` inside `folder`. Answers
 /// like Tayang's own voice does, with no credits charged.
-pub async fn speak(client: &reqwest::Client, setup: &VoiceSetup, text: &str, language: Option<&str>, voice: Option<&str>, out: &Path, folder: &Path) -> Result<Value, (u16, Value)> {
+pub async fn speak(client: &reqwest::Client, setup: &VoiceSetup, text: &str, language: Option<&str>, voice: Option<&str>, model: Option<&str>, instruct: Option<&str>, out: &Path, folder: &Path) -> Result<Value, (u16, Value)> {
     let key = setup.key.as_deref().unwrap_or("");
     let name = setup.source.name();
     let bytes = match setup.source {
         VoiceSource::Elevenlabs => eleven_speak(client, &setup.base, key, text).await,
         VoiceSource::Fishaudio => fish_speak(client, &setup.base, key, text, language).await,
-        VoiceSource::Voicestudio => voicestudio_speak(client, &setup.base, text, language, voice).await,
+        VoiceSource::Voicestudio => voicestudio_speak(client, &setup.base, text, language, voice, model, instruct).await,
         VoiceSource::Gemini => gemini_speak(client, &setup.base, key, text).await,
         VoiceSource::Tayang => Err(VoiceError::Failed),
     }
@@ -504,7 +512,7 @@ mod tests {
         let f = fake(|_, _| (200, "ID3-mp3-bytes".into())).await;
         let dir = tempfile::tempdir().unwrap();
         let s = setup(VoiceSource::Fishaudio, &f.base);
-        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
+        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, None, None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
         assert_eq!(answer, json!({ "files": ["audio/intro.mp3"], "creditsCharged": 0, "creditsLeft": null }));
         assert_eq!(std::fs::read(dir.path().join("audio/intro.mp3")).unwrap(), b"ID3-mp3-bytes");
         let hits = f.hits("/api/v1/tts");
@@ -558,7 +566,7 @@ mod tests {
         let f = fake(move |_, _| (200, answer.to_string())).await;
         let dir = tempfile::tempdir().unwrap();
         let s = VoiceSetup { source: VoiceSource::Gemini, key: Some("AIza-1".into()), base: f.base.clone() };
-        let got = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
+        let got = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, None, None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
         assert_eq!(got["files"], json!(["audio/intro.wav"]));
         assert_eq!(std::fs::read(dir.path().join("audio/intro.wav")).unwrap(), wav);
         let hits = f.hits("/api/v1beta/interactions");
@@ -611,22 +619,22 @@ mod tests {
         let f = fake(|_, _| (200, "RIFF....WAVEfmt ".into())).await;
         let dir = tempfile::tempdir().unwrap();
         let s = setup(VoiceSource::Voicestudio, &f.base);
-        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), Some("SANTI-Cheerful-Ad"), Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
+        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), Some("SANTI-Cheerful-Ad"), Some("voxcpm2"), Some("speak with cheerful curiosity"), Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
         // No mp3 encoder on that install: the file says what it is.
         assert_eq!(answer["files"], json!(["audio/intro.wav"]));
         assert!(dir.path().join("audio/intro.wav").is_file());
         let hits = f.hits("/api/v1/audio/speech");
         assert_eq!(hits[0].auth, None);
         let sent: Value = serde_json::from_str(&hits[0].body).unwrap();
-        assert_eq!(sent, json!({ "model": "tts-1", "voice": "SANTI-Cheerful-Ad", "input": "Halo dunia", "response_format": "mp3", "language": "id" }));
+        assert_eq!(sent, json!({ "model": "voxcpm2", "voice": "SANTI-Cheerful-Ad", "input": "Halo dunia", "response_format": "mp3", "language": "id", "instruct": "speak with cheerful curiosity" }));
     }
 
     #[tokio::test]
     async fn voicestudio_closed_or_too_much_text() {
         let client = http_client().unwrap();
-        assert_eq!(voicestudio_speak(&client, &dead_base().await, "Halo", None, None).await, Err(VoiceError::NotRunning));
+        assert_eq!(voicestudio_speak(&client, &dead_base().await, "Halo", None, None, None, None).await, Err(VoiceError::NotRunning));
         let long = "a".repeat(VOICESTUDIO_MAX_CHARS + 1);
-        assert_eq!(voicestudio_speak(&client, "http://unused", &long, None, None).await, Err(VoiceError::TooLong));
+        assert_eq!(voicestudio_speak(&client, "http://unused", &long, None, None, None, None).await, Err(VoiceError::TooLong));
         let (status, body) = VoiceError::NotRunning.refusal("VoiceStudio");
         assert_eq!(status, 503);
         assert!(body["message"].as_str().unwrap().contains("open VoiceStudio"));
@@ -653,7 +661,7 @@ mod tests {
         let f = fake(|_, _| (200, "ID3-eleven".into())).await;
         let dir = tempfile::tempdir().unwrap();
         let s = VoiceSetup { source: VoiceSource::Elevenlabs, key: Some("sk_1".into()), base: f.base.clone() };
-        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
+        let answer = speak(&http_client().unwrap(), &s, "Halo dunia", Some("id"), None, None, None, Path::new("audio/intro.mp3"), dir.path()).await.unwrap();
         assert_eq!(answer["files"], json!(["audio/intro.mp3"]));
         assert_eq!(std::fs::read(dir.path().join("audio/intro.mp3")).unwrap(), b"ID3-eleven");
         let hits = f.hits("/api/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=mp3_44100_128");

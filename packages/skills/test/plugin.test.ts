@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildSessionPreamble, languageHint, sessionFacts } from '../src/preamble';
 import { AUTOPILOT_RENDER_NOW, buildAutopilotBuildPrompt } from '../src/autopilot';
-import { FOREGROUND_RULE, LAYERS_RULE, RENDERS_RULE, SHEET_STEP, frameCheckPrompt } from '../src/frameCheck';
+import { FOREGROUND_RULE, LAYERS_RULE, RENDERS_RULE, SHEET_STEP, VOICESTUDIO_RULE, frameCheckPrompt } from '../src/frameCheck';
 import { buildProjectBrief } from '../src/project';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent-plugin');
@@ -104,6 +104,15 @@ describe('agent plugin', () => {
       styleId: null, scheduledAt: null, reviewState: 'none', postedAt: null, remindedAt: null, reviewRemindedAt: null,
       durationSec: null, createdAt: '', updatedAt: '' } as const;
     expect(buildProjectBrief(p, null, { fps: 30, frameCheck: false })).toContain(FOREGROUND_RULE);
+  });
+
+  it('directs VoiceStudio agents to read the API and emotion guides and select a clone per video', () => {
+    const skill = read('skills/tayang-studio/SKILL.md');
+    for (const guide of ['docs/agentic-voice.md', 'docs/expressive-speech.md']) {
+      expect(skill).toContain(guide);
+      expect(VOICESTUDIO_RULE).toContain(guide);
+    }
+    expect(VOICESTUDIO_RULE).toContain('Do not assume SANTI for every video');
   });
 
   it('has the agent start a new video asked for in a plain chat through /video, not build it there', () => {
