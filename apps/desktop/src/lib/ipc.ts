@@ -174,9 +174,14 @@ export const deleteJob = (id: string) => invoke<void>('delete_job', { id });
 export const setJobsArchived = (ids: string[], archived: boolean) => invoke<void>('set_jobs_archived', { ids, archived });
 
 // ---- agent ----
-/** Resolves true when Claude started without the Tayang plugin: send it the skills as text too. */
+/** The running agent may continue its saved ACP session after an app restart. */
+export interface AgentStartResult {
+  skillsAsText: boolean;
+  resumed: boolean;
+}
+
 export const agentStart = (chatId: string, agentId: AgentId, auto?: boolean) =>
-  invoke<boolean>('agent_start', auto === undefined ? { chatId, agentId } : { chatId, agentId, auto });
+  invoke<AgentStartResult>('agent_start', auto === undefined ? { chatId, agentId } : { chatId, agentId, auto });
 /** Auto mode for the running session: the agent runs commands without asking. */
 export const agentSetAuto = (chatId: string, on: boolean) => invoke<void>('agent_set_auto', { chatId, on });
 export const agentPrompt = (chatId: string, parts: MessagePart[]) =>

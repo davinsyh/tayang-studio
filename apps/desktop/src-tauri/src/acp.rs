@@ -269,6 +269,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct SessionOptions {
     pub meta: Option<Value>,
     pub env: Vec<(String, String)>,
+    /// An agent session previously stored for this chat. Unsupported or stale ids start fresh.
+    pub resume_session: Option<String>,
     /// Start in auto mode: commands run without asking (see `AcpManager::set_auto`).
     pub auto: bool,
     /// Use the agent's own `auto` mode (`session/set_mode`) for auto mode. Only Claude's
@@ -672,6 +674,7 @@ struct SessionCore {
     sink: Arc<dyn AcpSink>,
     permissions: Arc<Permissions>,
     session_id: OnceLock<String>,
+    resumed: AtomicBool,
     modes: Mutex<ModeState>,
     /// The models the agent offers; None when it reports none.
     models: Mutex<Option<ModelState>>,
@@ -923,7 +926,7 @@ impl SessionCore {
     }
 
     /// Opens the session; the answer says how to leave plan mode when it opened in it.
-    async fn handshake(&self, meta: Option<Value>) -> Result<Option<LeavePlan>> {
+    async fn handshake(&self, meta: Option<Value>, resume: Option<&str>) -> Result<Option<LeavePlan>> {
         let init = self
             .rpc
             .request(
@@ -957,14 +960,28 @@ impl SessionCore {
         if let Some(meta) = meta {
             new_params["_meta"] = meta;
         }
-        let created = self
-            .rpc
-            .request("session/new", new_params)
-            .await
-            .map_err(start_error)?;
+        let can_resume = init.pointer("/agentCapabilities/sessionCapabilities/resume")
+            .or_else(|| init.pointer("/agentCapabilities/session_capabilities/resume"))
+            .is_some_and(|value| !value.is_null() && value != &Value::Bool(false));
+        let resumed = if can_resume {
+            match resume {
+                Some(id) => tokio::time::timeout(Duration::from_secs(20), self.rpc.request("session/resume", json!({
+                    "sessionId": id, "cwd": self.cwd.to_string_lossy(), "mcpServers": []
+                }))).await.ok().and_then(|result| result.ok()),
+                None => None,
+            }
+        } else { None };
+        let created = match resumed {
+            Some(value) => {
+                self.resumed.store(true, Ordering::SeqCst);
+                value
+            }
+            None => self.rpc.request("session/new", new_params).await.map_err(start_error)?,
+        };
         let session_id = created
             .get("sessionId")
             .and_then(Value::as_str)
+            .or_else(|| self.resumed.load(Ordering::SeqCst).then_some(resume).flatten())
             .ok_or_else(|| AcpError("The agent did not open a session".into()))?;
         let _ = self.session_id.set(session_id.to_string());
         *self.modes.lock().unwrap() = parse_modes(&created);
@@ -1471,6 +1488,7 @@ impl AgentSession {
             sink,
             permissions,
             session_id: OnceLock::new(),
+            resumed: AtomicBool::new(false),
             modes: Mutex::new(ModeState::default()),
             models: Mutex::new(None),
             auto_approve: AtomicBool::new(false),
@@ -1497,7 +1515,7 @@ impl AgentSession {
             kill_tx: Mutex::new(Some(kill_tx)),
             supervisor: Mutex::new(Some(supervisor)),
         };
-        match tokio::time::timeout(start_timeout, session.core.handshake(options.meta)).await {
+        match tokio::time::timeout(start_timeout, session.core.handshake(options.meta, options.resume_session.as_deref())).await {
             Ok(Ok(plan)) => {
                 // A failed switch out of plan mode keeps the session rather than failing the start.
                 if let Some(how) = plan {
@@ -1594,6 +1612,11 @@ impl AcpManager {
             .get(chat_id)
             .cloned()
             .ok_or_else(|| AcpError("No agent is running for this chat".into()))
+    }
+
+    pub fn session_info(&self, chat_id: &str) -> Result<(String, bool)> {
+        let session = self.session(chat_id)?;
+        Ok((session.core.session_id().to_string(), session.core.resumed.load(Ordering::SeqCst)))
     }
 
     /// Spawns the agent in `cwd` and opens an ACP session there. Replaces any

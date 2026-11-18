@@ -177,16 +177,41 @@ export const BUSY_NOTE = stored('chat.busyNote');
 
 const RECAP_MESSAGES = 6;
 const RECAP_CHARS = 1500;
+const SESSION_CONTEXT_CHARS = 14000;
 
-/** The last 6 text messages as "You:"/"Agent:" lines, oldest first, within 1,500 characters, without A2UI blocks. */
-export function buildRecap(messages: ChatMessage[]): string {
+function spokenLines(messages: ChatMessage[]): string[] {
   const lines: string[] = [];
   for (const m of messages) {
     if (m.role === 'system') continue;
-    // A2UI blocks are drawn cards, not words: the next agent gets the prose only.
     const text = extractA2ui(stripFramesToken(m.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''))).text.trim();
     if (text) lines.push(`${m.role === 'user' ? 'You' : 'Agent'}: ${text}`);
   }
+  return lines;
+}
+
+/** Restores the original subject and the recent exchange when an ACP session cannot be resumed. */
+export function buildSessionContext(messages: ChatMessage[]): string {
+  const lines = spokenLines(messages);
+  if (!lines.length) return '';
+  const whole = lines.join('\n\n');
+  if (whole.length <= SESSION_CONTEXT_CHARS) return whole;
+  const opening = lines[0]!.slice(0, 3500);
+  const recent: string[] = [];
+  let used = opening.length + 60;
+  for (const line of lines.slice(1).reverse()) {
+    const room = SESSION_CONTEXT_CHARS - used - 2;
+    if (room <= 0) break;
+    const kept = line.slice(0, room);
+    recent.unshift(kept);
+    used += kept.length + 2;
+    if (kept.length < line.length) break;
+  }
+  return `Original request:\n${opening}\n\nRecent conversation:\n${recent.join('\n\n')}`;
+}
+
+/** The last 6 text messages as "You:"/"Agent:" lines, oldest first, within 1,500 characters, without A2UI blocks. */
+export function buildRecap(messages: ChatMessage[]): string {
+  const lines = spokenLines(messages);
   const kept: string[] = [];
   let used = 0;
   for (const line of lines.slice(-RECAP_MESSAGES).reverse()) {
@@ -740,6 +765,9 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     async send(chatId, parts, opts) {
+      const earlier = !get().started[chatId] && !isScratchChat(chatId)
+        ? (get().messages[chatId]?.length ? get().messages[chatId]! : await listMessages(chatId).catch(() => []))
+        : [];
       tracked.add(chatId);
       const attached = opts?.keepAttachments ? [] : (get().attachments[chatId] ?? []);
       const visible = [...attached, ...parts];
@@ -764,11 +792,14 @@ export const useChat = create<ChatState>((set, get) => {
         writeJob(chatId, 'working');
         let fresh = false;
         let noPlugin = false;
+        let resumed = false;
         if (!get().started[chatId]) {
           const auto = autoOn(get(), chatId, useApp.getState().settings?.autoMode ?? false);
           // Keep the toggle's value with the chat once it has a session.
           set((s) => ({ auto: { ...s.auto, [chatId]: auto } }));
-          noPlugin = (auto ? await agentStart(chatId, agent, true) : await agentStart(chatId, agent)) === true;
+          const opened = auto ? await agentStart(chatId, agent, true) : await agentStart(chatId, agent);
+          noPlugin = opened?.skillsAsText === true;
+          resumed = opened?.resumed === true;
           set((s) => ({ started: { ...s.started, [chatId]: true } }));
           fresh = true;
         }
@@ -794,11 +825,14 @@ export const useChat = create<ChatState>((set, get) => {
           }
         }
         const recap = pendingRecap.get(chatId);
-        if (recap?.text) {
+        const context = resumed ? '' : !isInternalChat(chatId) && fresh && earlier.length
+          ? buildSessionContext(earlier)
+          : recap?.text;
+        if (context) {
           // i18n-ignore: this goes to the agent, not the user
-          const intro = recap.switched ? 'Earlier in this chat, with another agent:' : 'Earlier in this chat:';
+          const intro = recap?.switched ? 'Earlier in this chat, with another agent:' : 'Earlier in this chat:';
           // i18n-ignore: this goes to the agent, not the user
-          lead.push({ type: 'text', text: `${intro}\n${recap.text}\n\nContinue from here.` });
+          lead.push({ type: 'text', text: `${intro}\n${context}\n\nContinue from here.` });
         }
         const notes = agentNotes.get(chatId);
         if (notes?.length) lead.push({ type: 'text', text: notes.join('\n') });

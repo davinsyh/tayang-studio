@@ -544,6 +544,24 @@ async fn session_options_reach_the_agent_as_meta_and_env() {
 }
 
 #[tokio::test]
+async fn resumes_saved_agent_session_or_starts_fresh_when_it_is_stale() {
+    let ws = workspace();
+    let manager = AcpManager::new();
+    let sink = Arc::new(RecordingSink::default());
+    let mut command = fake_agent();
+    command.push("--supports-resume".into());
+    let options = SessionOptions { resume_session: Some("sess-1".into()), ..Default::default() };
+    manager.start_with("c1", &command, &ws.cwd, sink.clone(), options).await.unwrap();
+    assert_eq!(manager.session_info("c1").unwrap(), ("sess-1".into(), true));
+    manager.stop("c1").await.unwrap();
+
+    let options = SessionOptions { resume_session: Some("missing".into()), ..Default::default() };
+    manager.start_with("c1", &command, &ws.cwd, sink, options).await.unwrap();
+    assert_eq!(manager.session_info("c1").unwrap(), ("sess-1".into(), false));
+    manager.stop("c1").await.unwrap();
+}
+
+#[tokio::test]
 async fn each_turn_appends_its_usage_to_the_usage_log() {
     let ws = workspace();
     let manager = AcpManager::new();

@@ -1199,7 +1199,7 @@ describe('Study preview', () => {
     vi.mocked(ipc.removeStudyDir).mockClear();
     vi.mocked(ipc.upsertJob).mockClear();
     vi.mocked(ipc.agentCancel).mockResolvedValue();
-    let up: (v: boolean) => void = () => {};
+    let up: (v: { skillsAsText: boolean; resumed: boolean }) => void = () => {};
     vi.mocked(ipc.agentStart).mockReturnValueOnce(new Promise((res) => (up = res)));
     const view = render(<Style />);
     await userEvent.type(screen.getByLabelText('Video link'), 'https://youtu.be/abc');
@@ -1208,7 +1208,7 @@ describe('Study preview', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(useStudy.getState().phase).toBe('failed'));
     const stopsBefore = vi.mocked(ipc.agentStop).mock.calls.length;
-    await act(async () => up(false));
+    await act(async () => up({ skillsAsText: false, resumed: false }));
     await waitFor(() => expect(vi.mocked(ipc.agentStop).mock.calls.length).toBeGreaterThan(stopsBefore));
     expect(ipc.agentPrompt).not.toHaveBeenCalled();
     expect(ipc.removeStudyDir).toHaveBeenCalledTimes(2); // after the cancel, and again once the agent was stopped
@@ -1469,7 +1469,7 @@ describe('Agents', () => {
 describe('Calendar', () => {
   it('asks for ideas in a scratch chat, shows its permission card and stops the agent after', async () => {
     useChat.getState().reset();
-    vi.mocked(ipc.agentStart).mockResolvedValue(false);
+    vi.mocked(ipc.agentStart).mockResolvedValue({ skillsAsText: false, resumed: false });
     vi.mocked(ipc.agentPrompt).mockResolvedValue();
     vi.mocked(ipc.agentRespondPermission).mockResolvedValue();
     render(<Calendar today={new Date(2026, 10, 4)} />);

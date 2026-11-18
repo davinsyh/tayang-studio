@@ -190,10 +190,10 @@ describe('Indonesian interface', () => {
 describe('saved text', () => {
   it('is saved in English and said in the active language', () => {
     const note = stored('chat.switched', { name: 'Gemini CLI' });
-    expect(note).toBe("Switched to Gemini CLI. It starts fresh and doesn't see the earlier messages.");
+    expect(note).toBe('Switched to Gemini CLI. The new agent will receive context from this chat.');
     expect(localized(note)).toBe(note);
     setUiLanguage('id');
-    expect(localized(note)).toBe('Beralih ke Gemini CLI. Agen ini mulai dari nol dan tidak melihat pesan sebelumnya.');
+    expect(localized(note)).toBe('Beralih ke Gemini CLI. Agen baru akan menerima konteks dari chat ini.');
     expect(localized(CLOSED_NOTE)).toBe(id.agents.closedNote);
     expect(localized(stored('chat.ranWithoutAsking', { what: 'npm test' }))).toBe('Dijalankan tanpa minta izin: npm test');
   });

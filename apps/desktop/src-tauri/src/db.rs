@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_chat_at ON messages(chat_id, created_at);
 DROP INDEX IF EXISTS messages_chat;
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  chat_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, session_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS styles (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, source_url TEXT,
   notes TEXT NOT NULL, prompt TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -662,6 +665,7 @@ impl Db {
         let conn = self.conn();
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE archived_at IS NOT NULL)", [])?;
+        tx.execute("DELETE FROM agent_sessions WHERE chat_id IN (SELECT id FROM chats WHERE archived_at IS NOT NULL)", [])?;
         let chats = tx.execute("DELETE FROM chats WHERE archived_at IS NOT NULL", [])?;
         let cards = tx.execute("DELETE FROM jobs WHERE archived_at IS NOT NULL AND status <> 'working'", [])?;
         tx.commit()?;
@@ -681,6 +685,25 @@ impl Db {
     pub fn get_chat(&self, id: &str) -> Result<Option<Chat>> {
         let sql = format!("{CHAT_SELECT} WHERE id = ?1");
         Ok(query_as::<Chat>(&self.conn(), &sql, &[&id])?.into_iter().next())
+    }
+
+    pub fn agent_session(&self, chat_id: &str, agent: AgentId) -> Result<Option<String>> {
+        let agent = serde_json::to_value(agent)?;
+        Ok(self.conn().query_row(
+            "SELECT session_id FROM agent_sessions WHERE chat_id = ?1 AND agent_id = ?2",
+            rusqlite::params![chat_id, agent.as_str().unwrap_or_default()],
+            |r| r.get(0),
+        ).optional()?)
+    }
+
+    pub fn save_agent_session(&self, chat_id: &str, agent: AgentId, session_id: &str) -> Result<()> {
+        let agent = serde_json::to_value(agent)?;
+        self.conn().execute(
+            "INSERT INTO agent_sessions (chat_id, agent_id, session_id) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(chat_id) DO UPDATE SET agent_id = excluded.agent_id, session_id = excluded.session_id",
+            rusqlite::params![chat_id, agent.as_str().unwrap_or_default(), session_id],
+        )?;
+        Ok(())
     }
 
     pub fn add_message(
@@ -1264,6 +1287,19 @@ mod tests {
 
     fn db() -> Db {
         Db::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn agent_session_survives_reopen_and_does_not_cross_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tayang.db");
+        let db = Db::open(&path).unwrap();
+        db.save_agent_session("chat-1", AgentId::Opencode, "session-1").unwrap();
+        drop(db);
+
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.agent_session("chat-1", AgentId::Opencode).unwrap().as_deref(), Some("session-1"));
+        assert_eq!(db.agent_session("chat-1", AgentId::Claude).unwrap(), None);
     }
 
     fn project(id: &str, updated: &str) -> Project {

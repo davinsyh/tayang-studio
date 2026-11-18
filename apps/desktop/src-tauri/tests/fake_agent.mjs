@@ -260,7 +260,13 @@ function handle(msg) {
         id,
         result: {
           protocolVersion: 1,
-          agentCapabilities: { loadSession: false, promptCapabilities: { image: true } },
+          agentCapabilities: {
+            loadSession: false,
+            promptCapabilities: { image: true },
+            ...(process.argv.includes("--supports-resume")
+              ? { sessionCapabilities: { resume: {} } }
+              : {}),
+          },
           authMethods: [],
         },
       });
@@ -299,6 +305,15 @@ function handle(msg) {
         }
         send({ id, result });
       }
+      return;
+    case "session/resume":
+      if (!process.argv.includes("--supports-resume") || params?.sessionId !== "sess-1") {
+        send({ id, error: { code: -32602, message: "session unavailable" } });
+        return;
+      }
+      sessionId = params.sessionId;
+      sessionCwd = params.cwd;
+      send({ id, result: { sessionId } });
       return;
     case "session/set_config_option":
       if (params?.configId === "mode" && ["build", "plan"].includes(params?.value)) {

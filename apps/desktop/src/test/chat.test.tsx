@@ -155,7 +155,7 @@ beforeEach(() => {
     parts,
     createdAt: '',
   }));
-  vi.mocked(ipc.agentStart).mockResolvedValue(false);
+  vi.mocked(ipc.agentStart).mockResolvedValue({ skillsAsText: false, resumed: false });
   vi.mocked(ipc.agentPrompt).mockResolvedValue();
   vi.mocked(ipc.agentRespondPermission).mockResolvedValue();
 });
@@ -670,7 +670,7 @@ describe('ChatProject', () => {
 
   it('sends the skills to Claude as text when the app has no plugin to give it', async () => {
     const user = userEvent.setup();
-    vi.mocked(ipc.agentStart).mockResolvedValueOnce(true);
+    vi.mocked(ipc.agentStart).mockResolvedValueOnce({ skillsAsText: true, resumed: false });
     render(<ChatProject chatId="c1" />);
     await screen.findByText('Kenapa rupiah melemah?', { selector: 'span' });
     await user.type(screen.getByRole('textbox', { name: 'Message' }), 'one');
@@ -1259,7 +1259,7 @@ describe('Agent picker', () => {
     await user.click(await screen.findByRole('button', { name: /Claude Code/ }));
     await user.click(await screen.findByRole('menuitem', { name: /opencode/ }));
     expect(
-      await screen.findByText("Switched to opencode. It starts fresh and doesn't see the earlier messages."),
+      await screen.findByText('Switched to opencode. The new agent will receive context from this chat.'),
     ).toBeInTheDocument();
   });
 
@@ -1306,7 +1306,7 @@ describe('Agent picker', () => {
     expect(ipc.agentStop).toHaveBeenCalledWith('c1');
     expect(
       await screen.findByText(
-        "Switched to opencode. It starts fresh: it sees this project's files but not the earlier messages.",
+        "Switched to opencode. The new agent will receive chat context and can read this project's files.",
       ),
     ).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /opencode/ })).toBeInTheDocument();
@@ -1356,6 +1356,33 @@ describe('Agent picker', () => {
     await waitFor(() => expect(screen.getByTestId('status-agent')).toHaveTextContent('22% used'));
     expect(screen.getByRole('button', { name: 'Gemini CLI usage' })).toBeInTheDocument();
     expect(screen.queryByText(/11% used/)).toBeNull();
+  });
+});
+
+describe('session continuity', () => {
+  const saved = [
+    { id: 'old-1', chatId: 'c1', role: 'user' as const, parts: [{ type: 'text' as const, text: 'Buat video tentang FlowOS' }], createdAt: '' },
+    { id: 'old-2', chatId: 'c1', role: 'agent' as const, parts: [{ type: 'text' as const, text: 'Kita pilih gaya kinetic type.' }], createdAt: '' },
+  ];
+
+  it('passes saved chat context when a restarted agent cannot resume its session', async () => {
+    vi.mocked(ipc.listMessages).mockResolvedValue(saved);
+    await useChat.getState().send('c1', [{ type: 'text', text: 'Lanjutkan video tadi' }]);
+    const parts = vi.mocked(ipc.agentPrompt).mock.calls[0]![1];
+    const prompt = parts.map((p) => p.type === 'text' ? p.text : '').join('\n');
+    expect(prompt).toContain('Buat video tentang FlowOS');
+    expect(prompt).toContain('Kita pilih gaya kinetic type.');
+    expect(prompt).toContain('Lanjutkan video tadi');
+  });
+
+  it('does not repeat saved messages when the agent session was resumed', async () => {
+    vi.mocked(ipc.listMessages).mockResolvedValue(saved);
+    vi.mocked(ipc.agentStart).mockResolvedValue({ skillsAsText: false, resumed: true });
+    await useChat.getState().send('c1', [{ type: 'text', text: 'Lanjutkan video tadi' }]);
+    const parts = vi.mocked(ipc.agentPrompt).mock.calls[0]![1];
+    const prompt = parts.map((p) => p.type === 'text' ? p.text : '').join('\n');
+    expect(prompt).not.toContain('Buat video tentang FlowOS');
+    expect(prompt).toContain('Lanjutkan video tadi');
   });
 });
 

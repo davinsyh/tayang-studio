@@ -1259,7 +1259,7 @@ fn session_options(agent: AgentId, plugin: Option<&Path>, skills: bool) -> crate
     let env = vec![("TAYANG_STUDIO".to_string(), "1".to_string())];
     let use_modes = agent == AgentId::Claude;
     if agent != AgentId::Claude || !skills {
-        return crate::acp::SessionOptions { meta: None, env, auto: false, use_modes, mode_timeout: None, model: None, error_log: error_log(agent), usage_log: None };
+        return crate::acp::SessionOptions { meta: None, env, resume_session: None, auto: false, use_modes, mode_timeout: None, model: None, error_log: error_log(agent), usage_log: None };
     }
     let mut meta = serde_json::json!({ "systemPrompt": { "append": TAYANG_APPEND } });
     if let Some(path) = plugin {
@@ -1267,7 +1267,7 @@ fn session_options(agent: AgentId, plugin: Option<&Path>, skills: bool) -> crate
             "options": { "plugins": [{ "type": "local", "path": path.to_string_lossy() }] }
         });
     }
-    crate::acp::SessionOptions { meta: Some(meta), env, auto: false, use_modes, mode_timeout: None, model: None, error_log: error_log(agent), usage_log: None }
+    crate::acp::SessionOptions { meta: Some(meta), env, resume_session: None, auto: false, use_modes, mode_timeout: None, model: None, error_log: error_log(agent), usage_log: None }
 }
 
 /// Adds a local plugin to a Claude session that has `_meta` (sessions without it get no plugins).
@@ -1517,9 +1517,14 @@ pub async fn claude_sign_out(
     Ok(crate::claude_account::sign_out(&claude, &dir).await)
 }
 
-/// Starts the chat's agent. Resolves `true` when Claude started without the Tayang
-/// plugin, so the caller must send the skills as text in the first prompt (other
-/// agents always get them that way).
+/// Starts the chat's agent and reports whether an earlier ACP session was restored.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStartResult {
+    skills_as_text: bool,
+    resumed: bool,
+}
+
 #[tauri::command]
 pub async fn agent_start(
     app: AppHandle,
@@ -1527,7 +1532,7 @@ pub async fn agent_start(
     chat_id: String,
     agent_id: AgentId,
     auto: Option<bool>,
-) -> CmdResult<bool> {
+) -> CmdResult<AgentStartResult> {
     let (command, launch_env) = agent_launch(&app, agent_id).await?;
     let folder = project_folder_for_chat(&state, &chat_id)?;
     let cwd = resolve_cwd(&state.working(), &chat_id, folder.as_deref())?;
@@ -1549,6 +1554,9 @@ pub async fn agent_start(
     options.env.extend(launch_env);
     options.auto = wants_auto(&chat_id, auto.unwrap_or(false));
     options.model = picked_model(&state, agent_id);
+    if state.db.get_chat(&chat_id).map_err(err)?.is_some() {
+        options.resume_session = state.db.agent_session(&chat_id, agent_id).map_err(err)?;
+    }
     options.usage_log = app.path().app_data_dir().ok().map(|dir| crate::acp::UsageLog {
         path: dir.join("agent-usage.jsonl"),
         agent: agent_key(agent_id),
@@ -1564,7 +1572,11 @@ pub async fn agent_start(
         .start_with(&chat_id, &command, &cwd, Arc::new(TauriSink(app)), options)
         .await
         .map_err(err)?;
-    Ok(skills_as_text)
+    let (session_id, resumed) = state.acp.session_info(&chat_id).map_err(err)?;
+    if state.db.get_chat(&chat_id).map_err(err)?.is_some() {
+        state.db.save_agent_session(&chat_id, agent_id, &session_id).map_err(err)?;
+    }
+    Ok(AgentStartResult { skills_as_text, resumed })
 }
 
 fn agent_key(agent: AgentId) -> String {

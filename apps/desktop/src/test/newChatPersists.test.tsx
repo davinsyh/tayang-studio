@@ -159,7 +159,7 @@ beforeEach(() => {
     parts,
     createdAt: '',
   }));
-  vi.mocked(ipc.agentStart).mockResolvedValue(false);
+  vi.mocked(ipc.agentStart).mockResolvedValue({ skillsAsText: false, resumed: false });
   vi.mocked(ipc.agentPrompt).mockResolvedValue();
 });
 
