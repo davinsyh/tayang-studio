@@ -1073,14 +1073,14 @@ pub async fn start_ai_proxy(handle: AppHandle) {
             let settings = state.db.get_settings(&state.home);
             let own_voice = settings.voice_source != crate::types::VoiceSource::Tayang;
             if own_voice {
-                if let crate::ai_proxy::AiJob::Voice { text, language, out, .. } = &job {
+                if let crate::ai_proxy::AiJob::Voice { text, language, voice, out } = &job {
                     let source = settings.voice_source;
                     let key = match (source.key_account(), handle.try_state::<ApiKeys>()) {
                         (Some(account), Some(keys)) => keys.get_account(account).await.ok().flatten(),
                         _ => None,
                     };
                     let setup = crate::voice::VoiceSetup { source, key, base: source.base().into() };
-                    return crate::voice::speak(auth.client(), &setup, text, language.as_deref(), out, &folder).await;
+                    return crate::voice::speak(auth.client(), &setup, text, language.as_deref(), voice.as_deref(), out, &folder).await;
                 }
                 if job == crate::ai_proxy::AiJob::Usage {
                     let usage = match &token {
