@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -60,6 +61,7 @@ def main() -> None:
     pending = {style_id: demo for style_id, demo in PAIRS.items() if f"mg15-{style_id}" not in existing}
     if not pending:
         print("All eight MG15 styles are already installed")
+        subprocess.run([sys.executable, str(Path(__file__).with_name("install-mg15-starters.py"))], check=True)
         return
 
     catalog = json.loads(get(f"{OPUS_RAW}/styles.json"))
@@ -162,6 +164,7 @@ def main() -> None:
             raise RuntimeError(f"Expected {len(existing) + len(prepared)} imported styles, found {found}")
 
     print(f"Imported {len(prepared)} styles; database backup: {backup}")
+    subprocess.run([sys.executable, str(Path(__file__).with_name("install-mg15-starters.py"))], check=True)
 
 
 if __name__ == "__main__":
