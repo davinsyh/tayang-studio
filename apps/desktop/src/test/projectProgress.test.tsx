@@ -117,7 +117,7 @@ describe('Antigravity render continuation', () => {
   const renderTool: AgentUpdate = { kind: 'tool', toolCallId: 'render-1', title: 'ffmpeg -i input.mp4 renders/final.mp4', status: 'running', toolKind: 'execute' };
 
   beforeEach(() => {
-    Object.assign(taskWaitTiming, { pollMs: 10, noOutputMs: 100, stalledMs: 100, maxMs: 500 });
+    Object.assign(taskWaitTiming, { pollMs: 10, noOutputMs: 100, stalledMs: 100, maxMs: 500, incompleteMs: 10 });
   });
   afterEach(() => Object.assign(taskWaitTiming, timing));
 
@@ -211,6 +211,49 @@ describe('Antigravity render continuation', () => {
     await emit('c1', { kind: 'tool', toolCallId: 'task-1', title: 'Create assets', status: 'done', toolKind: 'other' });
     expect(agentPrompt).toHaveBeenCalledTimes(1);
     expect(useChat.getState().streaming.c1).toBe(false);
+  });
+
+  it('continues a reply that explicitly says the work is still in progress', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'fix the video' }], { agentId: 'antigravity', job });
+    await emit('c1', { kind: 'text', text: 'Masih memproses 7 cuplikan adegan, harap tunggu sebentar.' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(true);
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(2));
+    await emit('c1', { kind: 'text', text: 'Selesai. Semua cuplikan sudah diperbaiki.' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('respects Stop while waiting to continue an unfinished reply', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'fix the video' }], { agentId: 'antigravity', job });
+    await emit('c1', { kind: 'text', text: 'Sedang menyusun cuplikan, mohon tunggu.' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await useChat.getState().cancel('c1');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+    expect(useChat.getState().streaming.c1).toBe(false);
+  });
+
+  it('lets the agent finish when it asks for the user to review a preview', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'show a preview first' }], { agentId: 'antigravity', job });
+    await emit('c1', { kind: 'text', text: 'Preview sudah siap. Apakah tampilannya sesuai?' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops automatic continuations after six unfinished replies', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'finish the video' }], { agentId: 'antigravity', job });
+    for (let i = 0; i < 6; i++) {
+      await emit('c1', { kind: 'text', text: 'Masih memproses, harap tunggu sebentar.' });
+      await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+      await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(i + 2));
+    }
+    await emit('c1', { kind: 'text', text: 'Masih memproses, harap tunggu sebentar.' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(7);
   });
 });
 

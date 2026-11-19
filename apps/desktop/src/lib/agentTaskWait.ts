@@ -7,7 +7,14 @@ export const taskWaitTiming = {
   noOutputMs: 180_000,
   stalledMs: 180_000,
   maxMs: 30 * 60_000,
+  incompleteMs: 15_000,
 };
+
+/** A reply that explicitly says work is still in progress is a yield, not a final result. */
+export function unfinishedAgentReply(text: string): boolean {
+  const tail = text.trim().slice(-700);
+  return /(?:\b(?:masih|sedang)\s+(?:memproses|mengerjakan|menjalankan|merender|rendering|menyusun|menunggu|menghasilkan|memperbarui|mengambil|mengedit|membuat|memasang|menyiapkan|menyelesaikan)\b|\bbelum\s+selesai\b|\b(?:harap|mohon)\s+tunggu\b|\b(?:saya\s+akan|akan\s+saya)\s+(?:lanjutkan|membuat|merender|memproses|menyelesaikan|menyiapkan|memperbarui|mengecek)\b|\b(?:still\s+(?:working|processing|rendering|running)|please\s+wait|work\s+in\s+progress|i(?:'ll|\s+will)\s+(?:continue|render|finish|check))\b)/i.test(tail);
+}
 
 export type RenderWaitResult =
   | { kind: 'finished'; file: FileInfo }

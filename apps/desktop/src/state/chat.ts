@@ -24,7 +24,7 @@ import { agentErrorText, AGENT_NAMES, trackAgentError } from '@/lib/agents';
 import { i18n, uiLanguage } from '@/i18n';
 import { stored } from '@/lib/stored';
 import { finishedRender } from '@/lib/renderCheck';
-import { waitForRenderTask } from '@/lib/agentTaskWait';
+import { taskWaitTiming, unfinishedAgentReply, waitForRenderTask } from '@/lib/agentTaskWait';
 import { isRenderTool } from '@/lib/renderTool';
 import { advanceProject, isWorkTool, resetProjectStatus } from '@/lib/projectStatus';
 import { endCommand, stopAllWatches, stopWatching, watchCommand } from '@/lib/renderWatch';
@@ -287,6 +287,7 @@ const skipRenderContinuation = new Map<string, number>();
 const pendingTools = new Map<string, Set<string>>();
 const failedTools = new Set<string>();
 const toolWaits = new Map<string, ReturnType<typeof setTimeout>>();
+const unfinishedWaits = new Map<string, ReturnType<typeof setTimeout>>();
 /** How many turns the chat has started in this app session; a change means a newer turn. */
 export const turnCount = (chatId: string) => turnSeq.get(chatId) ?? 0;
 
@@ -757,6 +758,20 @@ export const useChat = create<ChatState>((set, get) => {
         }, 5 * 60_000));
         return;
       }
+      const last = turnMessage(chatId);
+      const reply = last?.parts.filter((p) => p.type === 'text').at(-1)?.text ?? '';
+      if (u.stopReason === 'end_turn' && chatAgent.get(chatId) === 'antigravity'
+        && !waitsForAnswer(last) && unfinishedAgentReply(reply)
+        && (continuationCount.get(chatId) ?? 0) < 6 && !unfinishedWaits.has(chatId)) {
+        const timer = setTimeout(() => {
+          if (unfinishedWaits.get(chatId) !== timer || (turnSeq.get(chatId) ?? 0) !== seq) return;
+          unfinishedWaits.delete(chatId);
+          void continueAgent(chatId,
+            'Your last reply said the requested work was still in progress. Check the actual background task or process first. If it is running, wait for its completion; do not start a duplicate. Then finish the remaining requested work and verify the result. End only with a completed result or a specific question the user must answer. Do not reply merely that the user should wait.');
+        }, taskWaitTiming.incompleteMs);
+        unfinishedWaits.set(chatId, timer);
+        return;
+      }
       completeTurn(chatId, u.stopReason);
       return;
     }
@@ -767,6 +782,8 @@ export const useChat = create<ChatState>((set, get) => {
     renderWaits.delete(chatId);
     clearTimeout(toolWaits.get(chatId));
     toolWaits.delete(chatId);
+    clearTimeout(unfinishedWaits.get(chatId));
+    unfinishedWaits.delete(chatId);
     settleTools(chatId, 'failed');
     finish(chatId);
     endTurnImages(chatId, turnMessage(chatId)?.id, false);
@@ -992,6 +1009,12 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     async cancel(chatId) {
+      if (unfinishedWaits.has(chatId)) {
+        clearTimeout(unfinishedWaits.get(chatId));
+        unfinishedWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+        return;
+      }
       if (toolWaits.has(chatId)) {
         clearTimeout(toolWaits.get(chatId));
         toolWaits.delete(chatId);
@@ -1009,6 +1032,11 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     async stop(chatId) {
+      if (unfinishedWaits.has(chatId)) {
+        clearTimeout(unfinishedWaits.get(chatId));
+        unfinishedWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+      }
       if (toolWaits.has(chatId)) {
         clearTimeout(toolWaits.get(chatId));
         toolWaits.delete(chatId);
@@ -1100,6 +1128,8 @@ export const useChat = create<ChatState>((set, get) => {
       failedTools.clear();
       for (const timer of toolWaits.values()) clearTimeout(timer);
       toolWaits.clear();
+      for (const timer of unfinishedWaits.values()) clearTimeout(timer);
+      unfinishedWaits.clear();
       unlisten.forEach((p) => void p.then((fn) => fn()));
       unlisten = [];
       tracked.clear();
