@@ -24,6 +24,7 @@ import { agentErrorText, AGENT_NAMES, trackAgentError } from '@/lib/agents';
 import { i18n, uiLanguage } from '@/i18n';
 import { stored } from '@/lib/stored';
 import { finishedRender } from '@/lib/renderCheck';
+import { waitForRenderTask } from '@/lib/agentTaskWait';
 import { isRenderTool } from '@/lib/renderTool';
 import { advanceProject, isWorkTool, resetProjectStatus } from '@/lib/projectStatus';
 import { endCommand, stopAllWatches, stopWatching, watchCommand } from '@/lib/renderWatch';
@@ -278,6 +279,14 @@ export const dropRenderBaseline = (chatId: string) => baselines.delete(chatId);
 
 /** Turns started per chat, so a slow check from an earlier turn can't overwrite a newer one. */
 const turnSeq = new Map<string, number>();
+const renderObserved = new Map<string, number>();
+const renderObservedAt = new Map<string, number>();
+const renderWaits = new Map<string, AbortController>();
+const continuationCount = new Map<string, number>();
+const skipRenderContinuation = new Map<string, number>();
+const pendingTools = new Map<string, Set<string>>();
+const failedTools = new Set<string>();
+const toolWaits = new Map<string, ReturnType<typeof setTimeout>>();
 /** How many turns the chat has started in this app session; a change means a newer turn. */
 export const turnCount = (chatId: string) => turnSeq.get(chatId) ?? 0;
 
@@ -481,6 +490,8 @@ export const useChat = create<ChatState>((set, get) => {
     const render = useRender.getState();
     const running = status === 'pending' || status === 'running';
     if (running && isRenderTool(title, renderArgvOf(projectId))) {
+      if (renderObserved.get(chatId) !== (turnSeq.get(chatId) ?? 0)) renderObservedAt.set(chatId, Date.now());
+      renderObserved.set(chatId, turnSeq.get(chatId) ?? 0);
       if (render.runs[projectId]) return;
       render.start(projectId, { source: 'agent', chatId, toolCallId });
       writeJob(chatId, 'working', stored('agents.rendering'));
@@ -505,6 +516,8 @@ export const useChat = create<ChatState>((set, get) => {
       rendering(id) {
         const render = useRender.getState();
         if (render.runs[projectId] || !get().streaming[chatId]) return;
+        if (renderObserved.get(chatId) !== (turnSeq.get(chatId) ?? 0)) renderObservedAt.set(chatId, Date.now());
+        renderObserved.set(chatId, turnSeq.get(chatId) ?? 0);
         render.start(projectId, { source: 'agent', chatId, toolCallId: id });
         writeJob(chatId, 'working', stored('agents.rendering'));
       },
@@ -607,6 +620,78 @@ export const useChat = create<ChatState>((set, get) => {
     writeJob(chatId, 'needs-you', stored(asked ? 'agents.waitingAnswer' : 'agents.noVideo'));
   };
 
+  const completeTurn = (chatId: string, stopReason: string) => {
+    renderObserved.delete(chatId);
+    renderObservedAt.delete(chatId);
+    pendingTools.delete(chatId);
+    failedTools.delete(chatId);
+    const startedAt = get().turnStartedAt[chatId] ?? Date.now();
+    const job = chatJobs.get(chatId);
+    if (stopReason === 'cancelled') writeJob(chatId, 'done', stored('agents.cancelled'));
+    else if (job && !job.auto) void settleBuildJob(chatId, job, startedAt, turnSeq.get(chatId) ?? 0);
+    else writeJob(chatId, 'done');
+    settleTools(chatId, stopReason === 'cancelled' ? 'failed' : 'done');
+    finish(chatId);
+    endTurnImages(chatId, turnMessage(chatId)?.id, true);
+    if (stopReason !== 'cancelled') {
+      const last = [...(get().messages[chatId] ?? [])].reverse().find((m) => m.role === 'agent');
+      void notifyAgent(chatId, waitsForAnswer(last) ? 'asks' : 'done');
+    }
+  };
+
+  const continueAgent = async (chatId: string, prompt: string) => {
+    continuationCount.set(chatId, (continuationCount.get(chatId) ?? 0) + 1);
+    renderObserved.delete(chatId);
+    renderObservedAt.delete(chatId);
+    replaceLast(chatId, (m) => ({ ...m, parts: [...m.parts, { type: 'text', text: '\n\n' }] }));
+    try {
+      await agentPrompt(chatId, [{ type: 'text', text: prompt }]);
+    } catch (e) {
+      onUpdate(chatId, { kind: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const finishToolWait = (chatId: string, failed = false) => {
+    const timer = toolWaits.get(chatId);
+    if (!timer) return;
+    clearTimeout(timer);
+    toolWaits.delete(chatId);
+    void continueAgent(chatId, failed || failedTools.has(chatId)
+      ? 'A pending tool finished with an error. Inspect its result, fix the cause, and complete the original request before ending.'
+      : 'The pending tools have finished. Continue the original request, verify their results, and finish the remaining work before ending.');
+  };
+
+  const superviseRender = async (chatId: string, projectId: string) => {
+    const controller = new AbortController();
+    renderWaits.set(chatId, controller);
+    const seq = turnSeq.get(chatId) ?? 0;
+    const baseline = Date.parse(baselines.get(chatId) ?? new Date(get().turnStartedAt[chatId] ?? Date.now()).toISOString());
+    const since = Math.max(baseline, renderObservedAt.get(chatId) ?? baseline);
+    writeJob(chatId, 'working', stored('agents.rendering'));
+    try {
+      const alreadyFinished = await finishedRender(projectId, since);
+      if (renderWaits.get(chatId) !== controller) return;
+      if (alreadyFinished) {
+        renderWaits.delete(chatId);
+        completeTurn(chatId, 'end_turn');
+        return;
+      }
+      const result = await waitForRenderTask(projectId, since, controller.signal);
+      if (renderWaits.get(chatId) !== controller || (turnSeq.get(chatId) ?? 0) !== seq) return;
+      renderWaits.delete(chatId);
+      if (result.kind === 'aborted' || result.kind === 'timeout') {
+        completeTurn(chatId, 'end_turn');
+        return;
+      }
+      const prompt = result.kind === 'finished'
+        ? `Tayang verified that the render finished at ${result.file.path}. Continue the original task: inspect the result, complete any remaining requested steps, and report the final file. Do not render again unless verification finds a problem.`
+        : 'The previous render command ended without a verified final video. First check whether that render is still running; if it is, wait for it. Otherwise fix the failure and render in the foreground. Verify the final MP4 before ending this turn.';
+      await continueAgent(chatId, prompt);
+    } catch (e) {
+      onUpdate(chatId, { kind: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const onUpdate = (chatId: string, u: AgentUpdate) => {
     if (!tracked.has(chatId)) return;
     if (u.kind === 'text' || u.kind === 'thought' || u.kind === 'tool') {
@@ -637,9 +722,15 @@ export const useChat = create<ChatState>((set, get) => {
         return { ...m, parts };
       });
       if (u.kind === 'tool') {
+        const pending = pendingTools.get(chatId) ?? new Set<string>();
+        if (u.status === 'pending' || u.status === 'running') pending.add(u.toolCallId);
+        else pending.delete(u.toolCallId);
+        if (u.status === 'failed') failedTools.add(chatId);
+        pendingTools.set(chatId, pending);
         trackRender(chatId, u.toolCallId, u.title, u.status);
         watchRenderFile(chatId, u.toolCallId, u.status, u.toolKind);
         if (u.status === 'done') queueImages(chatId);
+        if (!pending.size && toolWaits.has(chatId)) finishToolWait(chatId, u.status === 'failed');
         // The first edit or command that finishes in a video's chat: it is being built.
         const projectId = chatJobs.get(chatId)?.projectId;
         if (projectId && isWorkTool({ type: 'tool', toolCallId: u.toolCallId, title: u.title, status: u.status, toolKind: u.toolKind })) {
@@ -649,27 +740,33 @@ export const useChat = create<ChatState>((set, get) => {
       return;
     }
     if (u.kind === 'done') {
-      const startedAt = get().turnStartedAt[chatId] ?? Date.now();
+      const seq = turnSeq.get(chatId) ?? 0;
       const job = chatJobs.get(chatId);
-      // A Stop is the user's choice, not a failure: done, with a note saying so (never "needs you").
-      // The autopilot's own failures go through failChatJob, which has already dropped the job by now.
-      if (u.stopReason === 'cancelled') writeJob(chatId, 'done', stored('agents.cancelled'));
-      else if (job && !job.auto) void settleBuildJob(chatId, job, startedAt, turnSeq.get(chatId) ?? 0);
-      else writeJob(chatId, 'done');
-      settleTools(chatId, u.stopReason === 'cancelled' ? 'failed' : 'done');
-      finish(chatId);
-      // The message is stored once, with every image the turn made.
-      endTurnImages(chatId, turnMessage(chatId)?.id, true);
-      // Tell the user, unless they stopped it themselves: it waits for their pick, or it is done.
-      if (u.stopReason !== 'cancelled') {
-        const last = [...(get().messages[chatId] ?? [])].reverse().find((m) => m.role === 'agent');
-        void notifyAgent(chatId, waitsForAnswer(last) ? 'asks' : 'done');
+      if (u.stopReason === 'end_turn' && job && !job.auto && chatAgent.get(chatId) === 'antigravity'
+        && renderObserved.get(chatId) === seq && (continuationCount.get(chatId) ?? 0) < 3
+        && skipRenderContinuation.get(chatId) !== seq && !renderWaits.has(chatId)) {
+        void superviseRender(chatId, job.projectId);
+        return;
       }
+      if (u.stopReason === 'end_turn' && chatAgent.get(chatId) === 'antigravity'
+        && pendingTools.get(chatId)?.size && (continuationCount.get(chatId) ?? 0) < 3 && !toolWaits.has(chatId)
+        && !(skipRenderContinuation.get(chatId) === seq && renderObserved.get(chatId) === seq)) {
+        toolWaits.set(chatId, setTimeout(() => {
+          toolWaits.delete(chatId);
+          completeTurn(chatId, 'end_turn');
+        }, 5 * 60_000));
+        return;
+      }
+      completeTurn(chatId, u.stopReason);
       return;
     }
     // The session's models are the models store's (see state/models), not part of the conversation.
     if (u.kind === 'models') return;
     // error: the session is gone, so the next send must start a new one
+    renderWaits.get(chatId)?.abort();
+    renderWaits.delete(chatId);
+    clearTimeout(toolWaits.get(chatId));
+    toolWaits.delete(chatId);
     settleTools(chatId, 'failed');
     finish(chatId);
     endTurnImages(chatId, turnMessage(chatId)?.id, false);
@@ -772,6 +869,14 @@ export const useChat = create<ChatState>((set, get) => {
       const attached = opts?.keepAttachments ? [] : (get().attachments[chatId] ?? []);
       const visible = [...attached, ...parts];
       turnSeq.set(chatId, (turnSeq.get(chatId) ?? 0) + 1);
+      renderObserved.delete(chatId);
+      renderObservedAt.delete(chatId);
+      continuationCount.delete(chatId);
+      pendingTools.delete(chatId);
+      failedTools.delete(chatId);
+      if (parts.some((p) => p.type === 'text' && /\b(?:jangan\s+render|preview\s+dulu|lihat\s+preview\s+dulu|do\s+not\s+render|preview\s+first)\b/i.test(p.text))) {
+        skipRenderContinuation.set(chatId, turnSeq.get(chatId)!);
+      } else skipRenderContinuation.delete(chatId);
       // The last turn's message, still waiting for its images, is stored before this one.
       pendingSaves.get(chatId)?.();
       if (!get().streaming[chatId]) imageSince.set(chatId, new Date(Date.now() - IMAGE_SLACK_MS).toISOString());
@@ -887,10 +992,34 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     async cancel(chatId) {
+      if (toolWaits.has(chatId)) {
+        clearTimeout(toolWaits.get(chatId));
+        toolWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+        return;
+      }
+      const wait = renderWaits.get(chatId);
+      if (wait) {
+        wait.abort();
+        renderWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+        return;
+      }
       await agentCancel(chatId).catch(() => {});
     },
 
     async stop(chatId) {
+      if (toolWaits.has(chatId)) {
+        clearTimeout(toolWaits.get(chatId));
+        toolWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+      }
+      const wait = renderWaits.get(chatId);
+      if (wait) {
+        wait.abort();
+        renderWaits.delete(chatId);
+        completeTurn(chatId, 'cancelled');
+      }
       set((s) => ({ started: { ...s.started, [chatId]: false } }));
       await agentStop(chatId).catch(() => {});
     },
@@ -961,6 +1090,16 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     reset() {
+      for (const wait of renderWaits.values()) wait.abort();
+      renderWaits.clear();
+      renderObserved.clear();
+      renderObservedAt.clear();
+      continuationCount.clear();
+      skipRenderContinuation.clear();
+      pendingTools.clear();
+      failedTools.clear();
+      for (const timer of toolWaits.values()) clearTimeout(timer);
+      toolWaits.clear();
       unlisten.forEach((p) => void p.then((fn) => fn()));
       unlisten = [];
       tracked.clear();

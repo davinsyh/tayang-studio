@@ -31,8 +31,9 @@ vi.mock('@/lib/events', () => ({
   onPermission: vi.fn(async () => () => {}),
 }));
 
-import { latestRenderInfo, listJobs, newestVideoInfo, setProjectStatus, upsertJob } from '@/lib/ipc';
+import { agentPrompt, latestRenderInfo, listJobs, newestVideoInfo, setProjectStatus, upsertJob } from '@/lib/ipc';
 import { renderTiming } from '@/lib/renderCheck';
+import { taskWaitTiming } from '@/lib/agentTaskWait';
 import { resetLateRenders, settleLateRenders } from '@/lib/buildJobs';
 import { useChat } from '@/state/chat';
 import { useRender } from '@/state/render';
@@ -108,6 +109,108 @@ describe("a project's status follows its chat", () => {
     vi.mocked(latestRenderInfo).mockResolvedValue(video(new Date('2026-11-02T00:00:00.000Z')));
     await settleLateRenders(Date.parse('2026-11-03T00:00:00.000Z'), [waiting]);
     await waitFor(() => expect(statusCalls()).toEqual(['p9:rendered']));
+  });
+});
+
+describe('Antigravity render continuation', () => {
+  const timing = { ...taskWaitTiming };
+  const renderTool: AgentUpdate = { kind: 'tool', toolCallId: 'render-1', title: 'ffmpeg -i input.mp4 renders/final.mp4', status: 'running', toolKind: 'execute' };
+
+  beforeEach(() => {
+    Object.assign(taskWaitTiming, { pollMs: 10, noOutputMs: 100, stalledMs: 100, maxMs: 500 });
+  });
+  afterEach(() => Object.assign(taskWaitTiming, timing));
+
+  it('waits for a verified render, then continues the same agent session once', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'render it' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    await emit('c1', { ...renderTool, status: 'done' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(true);
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+
+    vi.mocked(latestRenderInfo).mockResolvedValue(video(new Date(Date.now() + 500)));
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(agentPrompt).mock.calls[1]![1][0]).toMatchObject({ type: 'text', text: expect.stringContaining('verified that the render finished') });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not continue when the render was already complete at the turn end', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'render it' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    vi.mocked(latestRenderInfo).mockResolvedValue(video(new Date(Date.now() + 500)));
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await waitFor(() => expect(useChat.getState().streaming.c1).toBe(false));
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the same agent to inspect an ended render that produced no video', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'render it' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    await emit('c1', { ...renderTool, status: 'done' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(agentPrompt).mock.calls[1]![1][0]).toMatchObject({ type: 'text', text: expect.stringContaining('without a verified final video') });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps waiting if the resumed agent starts a render on its next turn', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'render it' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    await emit('c1', { ...renderTool, status: 'done' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(2));
+    await emit('c1', { ...renderTool, toolCallId: 'render-2' });
+    await emit('c1', { ...renderTool, toolCallId: 'render-2', status: 'done' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(true);
+    vi.mocked(latestRenderInfo).mockResolvedValue(video(new Date(Date.now() + 500)));
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(3));
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+  });
+
+  it('stops waiting when the user cancels', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'render it' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await useChat.getState().cancel('c1');
+    vi.mocked(latestRenderInfo).mockResolvedValue(video(new Date(Date.now() + 500)));
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not continue a preview-only request', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'jangan render dulu, lihat preview dulu' }], { agentId: 'antigravity', job });
+    await emit('c1', renderTool);
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues once when a pending ACP tool reports completion after end_turn', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'finish the files' }], { agentId: 'antigravity' });
+    await emit('c1', { kind: 'tool', toolCallId: 'task-1', title: 'Create assets', status: 'running', toolKind: 'other' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(true);
+    await emit('c1', { kind: 'tool', toolCallId: 'task-1', title: 'Create assets', status: 'done', toolKind: 'other' });
+    await waitFor(() => expect(agentPrompt).toHaveBeenCalledTimes(2));
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    expect(useChat.getState().streaming.c1).toBe(false);
+  });
+
+  it('does not resume an observable task after the user stops waiting', async () => {
+    await useChat.getState().send('c1', [{ type: 'text', text: 'finish the files' }], { agentId: 'antigravity' });
+    await emit('c1', { kind: 'tool', toolCallId: 'task-1', title: 'Create assets', status: 'running', toolKind: 'other' });
+    await emit('c1', { kind: 'done', stopReason: 'end_turn' });
+    await useChat.getState().cancel('c1');
+    await emit('c1', { kind: 'tool', toolCallId: 'task-1', title: 'Create assets', status: 'done', toolKind: 'other' });
+    expect(agentPrompt).toHaveBeenCalledTimes(1);
+    expect(useChat.getState().streaming.c1).toBe(false);
   });
 });
 
